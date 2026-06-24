@@ -1,0 +1,39 @@
+Delivered-To: victim@example.com
+Received: from mail.evil-domain.ru (185.220.101.47) by mx.example.com
+        with SMTP id abc123; Sat, 16 May 2026 10:23:41 +0000
+Received: from localhost (localhost [127.0.0.1])
+        by mail.evil-domain.ru (Postfix) with ESMTP;
+        Sat, 16 May 2026 10:23:39 +0000 (UTC)
+X-Originating-IP: 185.220.101.47
+Authentication-Results: mx.example.com;
+        spf=fail (sender IP is 185.220.101.47) smtp.mailfrom=billing@paypal.com;
+        dmarc=fail action=none header.from=paypal.com
+Received-SPF: fail (mx.example.com: domain of billing@paypal.com does not
+        designate 185.220.101.47 as permitted sender)
+Message-ID: <FAKEABC123.evil@mail.evil-domain.ru>
+Date: Sat, 16 May 2026 10:23:38 +0000
+From: PayPal Billing <billing@paypal.com>
+Reply-To: collect-funds@evil-domain.ru
+To: victim@example.com
+Subject: [URGENT] Your PayPal account has been limited - Verify Now
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+
+Dear Customer,
+
+We have detected unusual activity on your PayPal account.
+Your account access has been temporarily limited.
+
+To restore full access, please verify your identity immediately:
+
+http://paypal-account-verify.login.evil-domain.ru/secure/update
+http://paypal-secure.account-confirm.evil-domain.ru/password/reset
+
+If you do not verify within 24 hours, your account will be permanently suspended.
+
+Thank you,
+PayPal Security Team
+
+-- 
+This email was sent from a notification-only address. Please do not reply.
+PayPal, 2211 North First Street, San Jose, CA 95131
