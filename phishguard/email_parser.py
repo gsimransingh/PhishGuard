@@ -69,18 +69,30 @@ def _extract_urls(text: str) -> list:
     return list(set(url_pattern.findall(text)))
 
 
+def _is_private_ip(ip: str) -> bool:
+    """
+    Return True if the IP is in a private or loopback range.
+    Correctly handles RFC 1918 ranges:
+      - 10.0.0.0/8
+      - 172.16.0.0/12  (172.16.x.x through 172.31.x.x only)
+      - 192.168.0.0/16
+      - 127.0.0.0/8 (loopback)
+    """
+    if ip.startswith("127.") or ip.startswith("10.") or ip.startswith("192.168."):
+        return True
+    # Correct RFC 1918 check: only 172.16.0.0 - 172.31.255.255
+    if re.match(r'^172\.(1[6-9]|2\d|3[01])\.', ip):
+        return True
+    return False
+
+
 def _extract_ips(text: str) -> list:
-    """Extract all IPv4 addresses from a block of text."""
+    """Extract all public IPv4 addresses from a block of text."""
     ip_pattern = re.compile(
         r'\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b'
     )
-    # Filter out private/loopback IPs
     all_ips = set(ip_pattern.findall(text))
-    public_ips = [
-        ip for ip in all_ips
-        if not (ip.startswith("127.") or ip.startswith("10.") or
-                ip.startswith("192.168.") or ip.startswith("172."))
-    ]
+    public_ips = [ip for ip in all_ips if not _is_private_ip(ip)]
     return public_ips
 
 
