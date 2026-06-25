@@ -1,3 +1,4 @@
+from typing import Optional
 import dns.resolver
 
 # ---------------------------------------------------------------------------
@@ -8,7 +9,7 @@ import dns.resolver
 # ---------------------------------------------------------------------------
 
 
-def validate_spf_dns(domain: str) -> dict:
+def validate_spf_dns(domain: str) -> dict[str, Optional[str]]:
     """
     Look up the SPF TXT record for a given domain via live DNS query.
     Returns a dict with status and the raw SPF record string.
@@ -46,7 +47,7 @@ def validate_spf_dns(domain: str) -> dict:
         return {"domain": domain, "status": "error", "record": "", "error": str(e)}
 
 
-def validate_dmarc_dns(domain: str) -> dict:
+def validate_dmarc_dns(domain: str) -> dict[str, Optional[str]]:
     """
     Look up the DMARC TXT record for a domain by querying _dmarc.<domain>.
     Returns a dict with status and the raw DMARC policy record.
@@ -90,12 +91,12 @@ def validate_dmarc_dns(domain: str) -> dict:
         return {"domain": domain, "dmarc_domain": dmarc_domain, "status": "error", "record": "", "policy": None, "error": str(e)}
 
 
-def _parse_dmarc_policy(record: str) -> dict:
+def _parse_dmarc_policy(record: str) -> dict[str, str]:
     """
     Parse key DMARC tags from a raw DMARC TXT record string.
     Extracts: p (policy), sp (subdomain policy), rua (report URI), pct (percentage).
     """
-    tags = {}
+    tags: dict[str, str] = {}
     for part in record.split(';'):
         part = part.strip()
         if '=' in part:

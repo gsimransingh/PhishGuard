@@ -1,7 +1,8 @@
 import email
 import re
 from email import policy
-from email.parser import BytesParser, Parser
+from email.parser import BytesParser
+from email.message import Message
 
 
 def parse_eml(file_path: str) -> dict:
@@ -12,22 +13,22 @@ def parse_eml(file_path: str) -> dict:
     with open(file_path, 'rb') as f:
         msg = BytesParser(policy=policy.default).parse(f)
 
-    result = {
-        "subject":      msg.get("Subject", ""),
-        "from":         msg.get("From", ""),
-        "reply_to":     msg.get("Reply-To", ""),
-        "to":           msg.get("To", ""),
-        "date":         msg.get("Date", ""),
-        "message_id":   msg.get("Message-ID", ""),
+    result: dict = {
+        "subject":          msg.get("Subject", ""),
+        "from":             msg.get("From", ""),
+        "reply_to":         msg.get("Reply-To", ""),
+        "to":               msg.get("To", ""),
+        "date":             msg.get("Date", ""),
+        "message_id":       msg.get("Message-ID", ""),
         "x_originating_ip": msg.get("X-Originating-IP", ""),
-        "received_chain": _extract_received_chain(msg),
-        "spf":          msg.get("Received-SPF", ""),
-        "dkim":         msg.get("DKIM-Signature", ""),
-        "dmarc":        msg.get("Authentication-Results", ""),
-        "body_text":    _get_body(msg),
-        "urls":         [],
-        "ips":          [],
-        "attachments":  [],
+        "received_chain":   _extract_received_chain(msg),
+        "spf":              msg.get("Received-SPF", ""),
+        "dkim":             msg.get("DKIM-Signature", ""),
+        "dmarc":            msg.get("Authentication-Results", ""),
+        "body_text":        _get_body(msg),
+        "urls":             [],
+        "ips":              [],
+        "attachments":      [],
     }
 
     result["urls"] = _extract_urls(result["body_text"])
@@ -37,12 +38,12 @@ def parse_eml(file_path: str) -> dict:
     return result
 
 
-def _extract_received_chain(msg) -> list:
+def _extract_received_chain(msg: Message) -> list[str]:
     """Extract all Received headers in order (oldest last)."""
     return msg.get_all("Received", [])
 
 
-def _get_body(msg) -> str:
+def _get_body(msg: Message) -> str:
     """Extract plain text body from the email."""
     body = ""
     if msg.is_multipart():
@@ -60,7 +61,7 @@ def _get_body(msg) -> str:
     return body
 
 
-def _extract_urls(text: str) -> list:
+def _extract_urls(text: str) -> list[str]:
     """Extract all URLs from a block of text using regex."""
     url_pattern = re.compile(
         r'https?://[^\s<>"{}|\\^`\[\]]+',
@@ -80,24 +81,22 @@ def _is_private_ip(ip: str) -> bool:
     """
     if ip.startswith("127.") or ip.startswith("10.") or ip.startswith("192.168."):
         return True
-    # Correct RFC 1918 check: only 172.16.0.0 - 172.31.255.255
     if re.match(r'^172\.(1[6-9]|2\d|3[01])\.', ip):
         return True
     return False
 
 
-def _extract_ips(text: str) -> list:
+def _extract_ips(text: str) -> list[str]:
     """Extract all public IPv4 addresses from a block of text."""
     ip_pattern = re.compile(
         r'\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b'
     )
     all_ips = set(ip_pattern.findall(text))
-    public_ips = [ip for ip in all_ips if not _is_private_ip(ip)]
-    return public_ips
+    return [ip for ip in all_ips if not _is_private_ip(ip)]
 
 
-def _extract_attachments(msg) -> list:
-    """Extract metadata of any attachments (filename, content-type)."""
+def _extract_attachments(msg: Message) -> list[dict]:
+    """Extract metadata of any attachments (filename, content-type, size)."""
     attachments = []
     for part in msg.walk():
         if part.get_content_disposition() == "attachment":
