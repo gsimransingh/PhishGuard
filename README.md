@@ -16,7 +16,7 @@ Given a `.eml` file, PhishGuard will:
 4. **Extract IOCs** — URLs, IPv4 addresses, and attachment metadata from the email body
 5. **Threat Intel** — check extracted IPs against AbuseIPDB and URLs against VirusTotal
 6. **Score risk** using a weighted flag system (SPF fail, DKIM missing, Reply-To mismatch, suspicious URLs, risky attachments, high-abuse IPs, malicious URLs)
-7. **Output** a structured report in human-readable text or JSON (SIEM-ready)
+7. **Output** a structured report in text, JSON, HTML, or CEF format
 
 ---
 
@@ -24,12 +24,16 @@ Given a `.eml` file, PhishGuard will:
 
 ```
 PhishGuard/
-├── main.py                      # CLI entry point
+├── main.py                      # Entry point (thin wrapper)
 ├── requirements.txt             # Dependencies
 ├── phishguard/
+│   ├── __init__.py              # Package metadata
+│   ├── analyzer.py              # Core analysis engine & risk scoring
+│   ├── cli.py                   # CLI argument parsing & output formatting
 │   ├── email_parser.py          # .eml parsing & IOC extraction
+│   ├── dns_validator.py         # Live SPF & DMARC DNS lookups
 │   ├── threat_intel.py          # AbuseIPDB & VirusTotal API integrations
-│   └── dns_validator.py         # Live SPF & DMARC DNS lookups
+│   └── report_generator.py      # HTML report & CEF log generation
 └── samples/
     └── phishing_test.eml        # Sample phishing email for testing
 ```
@@ -56,7 +60,13 @@ export ABUSEIPDB_API_KEY="your_key_here"
 export VIRUSTOTAL_API_KEY="your_key_here"
 ```
 
-Without keys, the tool still runs fully in offline mode.
+**Windows (PowerShell):**
+```powershell
+$env:ABUSEIPDB_API_KEY="your_key_here"
+$env:VIRUSTOTAL_API_KEY="your_key_here"
+```
+
+Without keys, the tool runs fully in offline mode — no crashes, no errors.
 
 ---
 
@@ -69,6 +79,12 @@ python main.py -f samples/phishing_test.eml
 # JSON output (SIEM-ready)
 python main.py -f samples/phishing_test.eml -o json
 
+# HTML report (save to file)
+python main.py -f samples/phishing_test.eml -o html --html-out report.html
+
+# CEF log (for SIEM ingestion)
+python main.py -f samples/phishing_test.eml -o cef
+
 # Offline mode (skip API calls)
 python main.py -f samples/phishing_test.eml --no-intel
 ```
@@ -78,8 +94,21 @@ python main.py -f samples/phishing_test.eml --no-intel
 | Flag | Description |
 |------|-------------|
 | `-f`, `--file` | Path to the `.eml` file (required) |
-| `-o`, `--output` | Output format: `text` (default) or `json` |
+| `-o`, `--output` | Output format: `text` (default), `json`, `html`, or `cef` |
 | `--no-intel` | Skip AbuseIPDB / VirusTotal lookups (offline mode) |
+| `--html-out` | File path to save HTML report (used with `-o html`) |
+| `-v`, `--version` | Show version and exit |
+
+---
+
+## Output Formats
+
+| Format | Use Case |
+|--------|----------|
+| `text` | Human-readable terminal output for quick triage |
+| `json` | SIEM integration, scripting, programmatic access |
+| `html` | Shareable visual reports for stakeholders |
+| `cef` | Common Event Format for SIEM ingestion (Splunk, QRadar, etc.) |
 
 ---
 
@@ -111,30 +140,45 @@ PhishGuard calculates a risk score based on weighted flags:
 
 ---
 
-## Sample JSON Output
+## Sample Output
 
+**Text:**
+```
+============================================================
+  PhishGuard v0.2.0 - Analysis Report
+  Risk Level : HIGH (score: 115)
+============================================================
+  Flags:
+    [!] SPF check failed
+    [!] DKIM signature missing
+    [!] DMARC check failed
+    [!] Reply-To mismatch: sender=billing@paypal.com, reply_to=collect-funds@evil-domain.ru
+    [!] Suspicious URLs found: ['http://paypal-account-verify.login.evil-domain.ru/secure/update']
+============================================================
+```
+
+**JSON:**
 ```json
 {
   "tool": "PhishGuard",
   "version": "0.2.0",
   "risk_level": "HIGH",
-  "risk_score": 120,
+  "risk_score": 115,
   "flags": [
     "SPF check failed",
     "DKIM signature missing",
     "DMARC check failed",
-    "Reply-To mismatch: sender=billing@paypal.com, reply_to=collect@evil.ru",
-    "Suspicious URLs found: ['http://paypal-verify.login.evil.ru/account']",
-    "High-abuse IP detected: 185.220.101.47 (score: 98, Frantech Solutions)"
+    "Reply-To mismatch: sender=billing@paypal.com, reply_to=collect-funds@evil-domain.ru",
+    "Suspicious URLs found: ['http://paypal-account-verify.login.evil-domain.ru/secure/update']"
   ],
   "iocs": {
-    "urls": ["http://paypal-verify.login.evil.ru/account"],
+    "urls": ["http://paypal-account-verify.login.evil-domain.ru/secure/update"],
     "ips": ["185.220.101.47"],
     "attachments": []
   },
   "threat_intel": {
     "ip_checks": [{"ip": "185.220.101.47", "abuse_confidence_score": 98, "total_reports": 847, "is_tor": true}],
-    "url_checks": [{"url": "http://paypal-verify.login.evil.ru/account", "malicious": 12, "suspicious": 3}]
+    "url_checks": [{"url": "http://paypal-account-verify.login.evil-domain.ru/secure/update", "malicious": 12, "suspicious": 3}]
   }
 }
 ```
@@ -143,7 +187,7 @@ PhishGuard calculates a risk score based on weighted flags:
 
 ## Tech Stack
 
-- **Python 3** — `email`, `re`, `argparse`, `json`, `datetime`
+- **Python 3.8+** — `email`, `re`, `argparse`, `json`, `datetime`
 - **requests** — AbuseIPDB & VirusTotal API calls
 - **dnspython** — live SPF/DMARC DNS lookups
 - **ipwhois** — IP geolocation/ASN (future use)
@@ -154,16 +198,22 @@ PhishGuard calculates a risk score based on weighted flags:
 
 - [x] `.eml` parsing — headers, body, URLs, IPs, attachments
 - [x] SPF / DKIM / DMARC header validation
-- [x] Live DNS SPF/DMARC record validation (`dns_validator.py`)
-- [x] Risk scoring engine
-- [x] JSON + text report output
-- [x] AbuseIPDB API integration for IP reputation checks
-- [x] VirusTotal API integration for URL/domain checks
-- [x] Sample phishing `.eml` test files
-- [x] `--no-intel` offline mode
-- [ ] HTML report output
+- [x] Live DNS SPF/DMARC record validation
+- [x] Risk scoring engine with weighted flags
+- [x] AbuseIPDB integration for IP reputation checks
+- [x] VirusTotal integration for URL/domain checks
+- [x] Offline mode (`--no-intel`)
+- [x] JSON output (SIEM-ready)
+- [x] HTML report output
+- [x] CEF log output (SIEM ingestion)
+- [x] Clean package architecture (`analyzer.py` as core engine)
+- [x] Full type hints across all modules
 - [ ] Batch analysis (analyze a folder of `.eml` files)
-- [ ] Export alerts to CSV / SIEM-compatible CEF format
+- [ ] Async DNS and threat intel lookups
+- [ ] Export alerts to CSV
+- [ ] Machine learning assisted scoring
+- [ ] Browser extension
+- [ ] REST API / web interface
 
 ---
 
@@ -173,4 +223,4 @@ This tool is intended for **educational and defensive security purposes only**. 
 
 ---
 
-*Built as part of a SOC analyst portfolio project.*
+*Built as part of a SOC analyst portfolio project by Gursimran Singh.*
