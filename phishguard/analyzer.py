@@ -9,6 +9,7 @@ import os
 import re
 import sys
 from datetime import datetime
+from typing import Optional
 
 from phishguard.threat_intel import check_ips, check_urls
 from phishguard.dns_validator import validate_spf_dns, validate_dmarc_dns
@@ -24,15 +25,15 @@ def analyze(parsed: dict, file_path: str, run_intel: bool = True) -> dict:
         run_intel:  If True, enrich IPs and URLs with live threat intel
 
     Returns:
-        A fully structured report dict ready for text/JSON/HTML output.
+        A fully structured report dict ready for text/JSON/HTML/CEF output.
     """
-    flags = []
-    score = 0
+    flags: list[str] = []
+    score: int = 0
 
     # --- SPF / DKIM / DMARC header checks ---
-    spf = parsed.get("spf", "").lower()
-    dkim = parsed.get("dkim", "")
-    dmarc = parsed.get("dmarc", "").lower()
+    spf: str = parsed.get("spf", "").lower()
+    dkim: str = parsed.get("dkim", "")
+    dmarc: str = parsed.get("dmarc", "").lower()
 
     if "fail" in spf or "softfail" in spf:
         flags.append("SPF check failed")
@@ -53,14 +54,14 @@ def analyze(parsed: dict, file_path: str, run_intel: bool = True) -> dict:
         score += 10
 
     # --- Reply-To mismatch ---
-    sender = parsed.get("from", "")
-    reply_to = parsed.get("reply_to", "")
+    sender: str = parsed.get("from", "")
+    reply_to: str = parsed.get("reply_to", "")
     if reply_to and reply_to != sender:
         flags.append(f"Reply-To mismatch: sender={sender}, reply_to={reply_to}")
         score += 20
 
     # --- Suspicious URLs ---
-    urls = parsed.get("urls", [])
+    urls: list[str] = parsed.get("urls", [])
     suspicious_keywords = ["login", "verify", "secure", "account", "update", "confirm", "password", "bank"]
     sus_urls = [u for u in urls if any(kw in u.lower() for kw in suspicious_keywords)]
     if sus_urls:
@@ -68,7 +69,7 @@ def analyze(parsed: dict, file_path: str, run_intel: bool = True) -> dict:
         score += min(len(sus_urls) * 10, 30)
 
     # --- Attachments ---
-    attachments = parsed.get("attachments", [])
+    attachments: list[dict] = parsed.get("attachments", [])
     risky_exts = [".exe", ".js", ".vbs", ".bat", ".ps1", ".docm", ".xlsm", ".zip"]
     for att in attachments:
         fname = att.get("filename", "").lower()
@@ -77,21 +78,21 @@ def analyze(parsed: dict, file_path: str, run_intel: bool = True) -> dict:
             score += 40
 
     # --- Live DNS validation ---
-    dns_results = {"spf": None, "dmarc": None}
+    dns_results: dict[str, Optional[dict]] = {"spf": None, "dmarc": None}
     sender_domain = _extract_domain(sender)
     if sender_domain:
         dns_results["spf"] = validate_spf_dns(sender_domain)
         dns_results["dmarc"] = validate_dmarc_dns(sender_domain)
-        if dns_results["spf"].get("status") == "not_found":
+        if dns_results["spf"] and dns_results["spf"].get("status") == "not_found":
             flags.append(f"No SPF DNS record found for domain: {sender_domain}")
             score += 10
-        if dns_results["dmarc"].get("status") == "not_found":
+        if dns_results["dmarc"] and dns_results["dmarc"].get("status") == "not_found":
             flags.append(f"No DMARC DNS record found for domain: {sender_domain}")
             score += 10
 
     # --- Threat Intel enrichment ---
-    intel_ips = []
-    intel_urls = []
+    intel_ips: list[dict] = []
+    intel_urls: list[dict] = []
     if run_intel:
         print("[*] Running threat intel lookups (this may take a moment)...", file=sys.stderr)
         if parsed.get("ips"):
@@ -119,13 +120,13 @@ def analyze(parsed: dict, file_path: str, run_intel: bool = True) -> dict:
         risk_level = "LOW"
 
     return {
-        "tool": "PhishGuard",
-        "version": "0.2.0",
+        "tool":        "PhishGuard",
+        "version":     "0.2.0",
         "analyzed_at": datetime.utcnow().isoformat() + "Z",
-        "file": os.path.basename(file_path),
-        "risk_level": risk_level,
-        "risk_score": score,
-        "flags": flags,
+        "file":        os.path.basename(file_path),
+        "risk_level":  risk_level,
+        "risk_score":  score,
+        "flags":       flags,
         "email_metadata": {
             "subject":    parsed["subject"],
             "from":       parsed["from"],
