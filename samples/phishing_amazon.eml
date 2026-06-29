@@ -1,0 +1,40 @@
+Delivered-To: victim@example.com
+Received: from mail.amazon-secure-alerts.ru (193.32.162.88) by mx.example.com
+        with SMTP id ghi012; Fri, 26 Jun 2026 14:22:10 +0000
+Received: from localhost (localhost [127.0.0.1])
+        by mail.amazon-secure-alerts.ru (Postfix) with ESMTP;
+        Fri, 26 Jun 2026 14:22:08 +0000 (UTC)
+X-Originating-IP: 193.32.162.88
+Authentication-Results: mx.example.com;
+        spf=fail (sender IP is 193.32.162.88) smtp.mailfrom=auto-confirm@amazon.com;
+        dmarc=fail action=none header.from=amazon.com
+Received-SPF: fail (mx.example.com: domain of auto-confirm@amazon.com does not
+        designate 193.32.162.88 as permitted sender)
+Message-ID: <AMZFAKE987.xyz@mail.amazon-secure-alerts.ru>
+Date: Fri, 26 Jun 2026 14:22:07 +0000
+From: Amazon Security <auto-confirm@amazon.com>
+Reply-To: support@amazon-secure-alerts.ru
+To: victim@example.com
+Subject: [URGENT] Unusual Sign-in Activity Detected - Verify Your Account Now
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+
+Dear Amazon Customer,
+
+We have detected unusual sign-in activity on your Amazon account
+from an unrecognized device in Russia.
+
+Your account has been temporarily suspended for your protection.
+
+To restore access and verify your identity, click the link below immediately:
+
+http://amazon-account-verify.login.amazon-secure-alerts.ru/secure/verify
+http://amazon-secure.account-confirm.amazon-secure-alerts.ru/password/reset
+
+You must verify within 12 hours or your account will be permanently closed
+and any pending orders will be cancelled.
+
+Amazon Security Team
+
+--
+Amazon.com, 410 Terry Ave N, Seattle, WA 98109

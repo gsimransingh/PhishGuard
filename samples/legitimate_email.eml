@@ -1,0 +1,45 @@
+Delivered-To: john.doe@company.com
+Received: from mail.google.com (209.85.220.41) by mx.company.com
+        with SMTP id xyz789; Fri, 26 Jun 2026 09:15:22 +0000
+Received: from localhost (localhost [127.0.0.1])
+        by mail.google.com (Postfix) with ESMTPS;
+        Fri, 26 Jun 2026 09:15:20 +0000 (UTC)
+X-Originating-IP: 209.85.220.41
+Authentication-Results: mx.company.com;
+        spf=pass (sender IP is 209.85.220.41) smtp.mailfrom=noreply@github.com;
+        dkim=pass header.d=github.com;
+        dmarc=pass action=none header.from=github.com
+Received-SPF: pass (mx.company.com: domain of noreply@github.com designates
+        209.85.220.41 as permitted sender)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=github.com;
+        s=google; h=from:to:subject:date:message-id;
+        bh=abc123def456==; b=validSignatureHere
+Message-ID: <legitimate123.abc@mail.github.com>
+Date: Fri, 26 Jun 2026 09:15:18 +0000
+From: GitHub <noreply@github.com>
+Reply-To: noreply@github.com
+To: john.doe@company.com
+Subject: [GitHub] Your pull request was merged
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+
+Hi john.doe,
+
+Your pull request #42 "Add authentication middleware" was merged into main by Jane Smith.
+
+Repository: company/backend-api
+Branch: feature/auth-middleware -> main
+Merged at: 2026-06-26 09:14:55 UTC
+
+View the pull request:
+https://github.com/company/backend-api/pull/42
+
+You can manage notification settings at:
+https://github.com/settings/notifications
+
+Thanks,
+The GitHub Team
+
+---
+You're receiving this email because you authored a pull request.
+GitHub, Inc., 88 Colin P Kelly Jr Street, San Francisco, CA 94107

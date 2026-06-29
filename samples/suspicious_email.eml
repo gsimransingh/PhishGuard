@@ -1,0 +1,36 @@
+Delivered-To: employee@company.com
+Received: from mail.hr-updates-portal.com (91.108.4.55) by mx.company.com
+        with SMTP id def456; Fri, 26 Jun 2026 11:30:05 +0000
+Received: from localhost (localhost [127.0.0.1])
+        by mail.hr-updates-portal.com (Postfix) with ESMTP;
+        Fri, 26 Jun 2026 11:30:03 +0000 (UTC)
+X-Originating-IP: 91.108.4.55
+Authentication-Results: mx.company.com;
+        spf=softfail (sender IP is 91.108.4.55) smtp.mailfrom=hr@company.com;
+        dmarc=fail action=none header.from=company.com
+Received-SPF: softfail (mx.company.com: domain of hr@company.com does not
+        strongly designate 91.108.4.55 as permitted sender)
+Message-ID: <HR2026UPDATE.abc@mail.hr-updates-portal.com>
+Date: Fri, 26 Jun 2026 11:30:01 +0000
+From: HR Department <hr@company.com>
+Reply-To: hr-no-reply@hr-updates-portal.com
+To: employee@company.com
+Subject: Action Required: Update Your Benefits Information Before June 30
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+
+Dear Employee,
+
+Our records indicate that your benefits information needs to be updated
+before the end of this month to avoid interruption to your coverage.
+
+Please log in to the employee portal to review and update your details:
+
+http://hr-updates-portal.com/benefits/update
+http://hr-updates-portal.com/account/verify
+
+If you have any questions, please contact HR directly.
+
+Best regards,
+HR Department
+Company Inc.

@@ -9,68 +9,225 @@ import argparse
 import json
 import sys
 import os
+import csv
+from datetime import datetime
 
-from phishguard.email_parser import parse_eml
-from phishguard.analyzer import analyze
-from phishguard.report_generator import generate_html_report, generate_cef_log
+from phishguard.email_parser import parse_eml # type: ignore
+from phishguard.analyzer import analyze # type: ignore
+from phishguard.report_generator import generate_html_report, generate_cef_log # type: ignore
 
 
-def print_text_report(report: dict):
+# ---------------------------------------------------------------------------
+# Output Formatters
+# ---------------------------------------------------------------------------
+
+def print_text_report(report: dict, out=sys.stdout) -> str: # type: ignore
     """Print a human-readable summary of the report."""
     sep = "=" * 60
-    print(sep)
-    print(f"  PhishGuard v{report['version']} - Analysis Report")
-    print(f"  File       : {report['file']}")
-    print(f"  Analyzed   : {report['analyzed_at']}")
-    print(sep)
-    print(f"  Risk Level : {report['risk_level']} (score: {report['risk_score']})")
-    print(sep)
-    print("  Email Metadata:")
-    for k, v in report["email_metadata"].items():
-        print(f"    {k:<12}: {v}")
-    print(sep)
-    print("  Auth Headers:")
-    for k, v in report["auth_headers"].items():
-        status = v if v else "not present"
-        print(f"    {k.upper():<6}: {status[:80]}")
-    print(sep)
-    print("  DNS Validation:")
-    for k, v in report["dns_validation"].items():
+    lines = []
+    lines.append(sep) # type: ignore
+    lines.append(f"  PhishGuard v{report['version']} - Analysis Report") # type: ignore
+    lines.append(f"  File       : {report['file']}") # type: ignore
+    lines.append(f"  Analyzed   : {report['analyzed_at']}") # type: ignore
+    lines.append(sep) # type: ignore
+    lines.append(f"  Risk Level : {report['risk_level']} (score: {report['risk_score']})") # type: ignore
+    lines.append(sep) # type: ignore
+    lines.append("  Email Metadata:") # type: ignore
+    for k, v in report["email_metadata"].items(): # type: ignore
+        lines.append(f"    {k:<12}: {v}") # type: ignore
+    lines.append(sep) # type: ignore
+    lines.append("  Auth Headers:") # type: ignore
+    for k, v in report["auth_headers"].items(): # type: ignore
+        status = v if v else "not present" # type: ignore
+        lines.append(f"    {k.upper():<6}: {status[:80]}") # type: ignore
+    lines.append(sep) # type: ignore
+    lines.append("  DNS Validation:") # type: ignore
+    for k, v in report["dns_validation"].items(): # type: ignore
         if v:
-            print(f"    {k.upper():<6}: {v.get('status', 'n/a')} - {v.get('record', '')[:70]}")
-    print(sep)
-    print("  Flags:")
+            lines.append(f"    {k.upper():<6}: {v.get('status', 'n/a')} - {v.get('record', '')[:70]}") # type: ignore
+    lines.append(sep) # type: ignore
+    lines.append("  Flags:") # type: ignore
     if report["flags"]:
-        for flag in report["flags"]:
-            print(f"    [!] {flag}")
+        for flag in report["flags"]: # type: ignore
+            lines.append(f"    [!] {flag}") # type: ignore
     else:
-        print("    [+] No flags raised.")
-    print(sep)
-    print("  IOCs:")
-    print(f"    URLs        : {len(report['iocs']['urls'])} found")
-    for url in report["iocs"]["urls"]:
-        print(f"      - {url}")
-    print(f"    IPs         : {report['iocs']['ips']}")
-    print(f"    Attachments : {len(report['iocs']['attachments'])} found")
-    for att in report["iocs"]["attachments"]:
-        print(f"      - {att['filename']} ({att['content_type']}, {att['size_bytes']} bytes)")
-    print(sep)
-    print("  Threat Intel:")
-    for r in report["threat_intel"]["ip_checks"]:
-        if r.get("error"):
-            print(f"    IP {r.get('indicator', r.get('ip', ''))}: {r['error']}")
+        lines.append("    [+] No flags raised.") # type: ignore
+    lines.append(sep) # type: ignore
+    lines.append("  IOCs:") # type: ignore
+    lines.append(f"    URLs        : {len(report['iocs']['urls'])} found") # type: ignore
+    for url in report["iocs"]["urls"]: # type: ignore
+        lines.append(f"      - {url}") # type: ignore
+    lines.append(f"    IPs         : {report['iocs']['ips']}") # type: ignore
+    lines.append(f"    Attachments : {len(report['iocs']['attachments'])} found") # type: ignore
+    for att in report["iocs"]["attachments"]: # type: ignore
+        lines.append(f"      - {att['filename']} ({att['content_type']}, {att['size_bytes']} bytes)") # type: ignore
+    lines.append(sep) # type: ignore
+    lines.append("  Threat Intel:") # type: ignore
+    for r in report["threat_intel"]["ip_checks"]: # type: ignore
+        if r.get("error"): # type: ignore
+            lines.append(f"    IP {r.get('indicator', r.get('ip', ''))}: {r['error']}") # pyright: ignore[reportUnknownMemberType]
         else:
-            print(f"    IP {r['ip']}: AbuseScore={r['abuse_confidence_score']} | Reports={r['total_reports']} | ISP={r.get('isp', '')} | Tor={r.get('is_tor', False)}")
-    for r in report["threat_intel"]["url_checks"]:
-        if r.get("error"):
-            print(f"    URL {r.get('indicator', r.get('url', ''))}: {r['error']}")
+            lines.append(f"    IP {r['ip']}: AbuseScore={r['abuse_confidence_score']} | Reports={r['total_reports']} | ISP={r.get('isp', '')} | Tor={r.get('is_tor', False)}") # pyright: ignore[reportUnknownMemberType]
+    for r in report["threat_intel"]["url_checks"]: # pyright: ignore[reportUnknownVariableType]
+        if r.get("error"): # pyright: ignore[reportUnknownMemberType]
+            lines.append(f"    URL {r.get('indicator', r.get('url', ''))}: {r['error']}") # type: ignore
         else:
-            url_short = r.get('url', r.get('indicator', ''))[:55]
-            print(f"    URL {url_short}: malicious={r.get('malicious', 0)} | suspicious={r.get('suspicious', 0)}")
+            url_short = r.get('url', r.get('indicator', ''))[:55] # type: ignore
+            lines.append(f"    URL {url_short}: malicious={r.get('malicious', 0)} | suspicious={r.get('suspicious', 0)}") # type: ignore
     if not report["threat_intel"]["ip_checks"] and not report["threat_intel"]["url_checks"]:
-        print("    (no threat intel results)")
-    print(sep)
+        lines.append("    (no threat intel results)") # type: ignore
+    lines.append(sep) # type: ignore
 
+    output = "\n".join(lines) # type: ignore
+    print(output, file=out)
+    return output
+
+
+def print_batch_summary(results: list[dict], out=sys.stdout) -> str: # type: ignore
+    """Print a summary table of batch analysis results."""
+    sep = "=" * 70
+    lines = []
+    lines.append(sep) # type: ignore
+    lines.append(f"  PhishGuard - Batch Analysis Summary") # type: ignore
+    lines.append(f"  Analyzed   : {datetime.utcnow().isoformat()}Z") # type: ignore
+    lines.append(f"  Total Files: {len(results)}") # type: ignore
+    lines.append(sep) # type: ignore
+    lines.append(f"  {'File':<35} {'Risk':<8} {'Score':<8} {'Flags'}") # type: ignore
+    lines.append("-" * 70) # type: ignore
+    for r in results: # type: ignore
+        if r.get("error"): # type: ignore
+            lines.append(f"  {r['file']:<35} {'ERROR':<8} {'N/A':<8} {r['error']}") # type: ignore
+        else:
+            fname = r['file'][:33] + '..' if len(r['file']) > 35 else r['file'] # type: ignore
+            lines.append(f"  {fname:<35} {r['risk_level']:<8} {str(r['risk_score']):<8} {len(r['flags'])} flag(s)") # type: ignore
+    lines.append(sep) # type: ignore
+
+    high   = sum(1 for r in results if r.get("risk_level") == "HIGH") # type: ignore
+    medium = sum(1 for r in results if r.get("risk_level") == "MEDIUM") # type: ignore
+    low    = sum(1 for r in results if r.get("risk_level") == "LOW") # type: ignore
+    errors = sum(1 for r in results if r.get("error")) # type: ignore
+    lines.append(f"  HIGH: {high}  |  MEDIUM: {medium}  |  LOW: {low}  |  ERRORS: {errors}") # type: ignore
+    lines.append(sep) # type: ignore
+
+    output = "\n".join(lines) # type: ignore
+    print(output, file=out)
+    return output
+
+
+# ---------------------------------------------------------------------------
+# CSV Export
+# ---------------------------------------------------------------------------
+
+def export_csv(results: list[dict], csv_path: str): # type: ignore
+    """Export batch results to a CSV file."""
+    fieldnames = ["file", "risk_level", "risk_score", "flags", "urls", "ips", "analyzed_at", "error"]
+    with open(csv_path, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for r in results: # type: ignore
+            if r.get("error"): # type: ignore
+                writer.writerow({
+                    "file": r["file"], "risk_level": "ERROR",
+                    "risk_score": "", "flags": "", "urls": "",
+                    "ips": "", "analyzed_at": "", "error": r["error"],
+                })
+            else:
+                writer.writerow({
+                    "file":        r["file"],
+                    "risk_level":  r["risk_level"],
+                    "risk_score":  r["risk_score"],
+                    "flags":       " | ".join(r["flags"]), # type: ignore
+                    "urls":        " | ".join(r["iocs"]["urls"]), # type: ignore
+                    "ips":         " | ".join(r["iocs"]["ips"]), # type: ignore
+                    "analyzed_at": r["analyzed_at"],
+                    "error":       "",
+                })
+    print(f"[*] CSV saved to: {csv_path}", file=sys.stderr)
+
+
+# ---------------------------------------------------------------------------
+# Single File Analysis
+# ---------------------------------------------------------------------------
+
+def run_single(args: argparse.Namespace):
+    """Handle single file analysis."""
+    if not os.path.isfile(args.file):
+        print(f"[ERROR] File not found: {args.file}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"[*] Parsing {args.file} ...", file=sys.stderr)
+    parsed = parse_eml(args.file) # type: ignore
+    report = analyze(parsed, args.file, run_intel=not args.no_intel) # type: ignore
+
+    if args.output == "json":
+        content = json.dumps(report, indent=2)
+        print(content)
+    elif args.output == "html":
+        content = generate_html_report(report)
+        print(content)
+    elif args.output == "cef":
+        content = generate_cef_log(report)
+        print(content)
+    else:
+        content = print_text_report(report)
+
+    if args.save_output:
+        with open(args.save_output, 'w', encoding='utf-8') as f:
+            f.write(content)
+        print(f"[*] Output saved to: {args.save_output}", file=sys.stderr)
+
+
+# ---------------------------------------------------------------------------
+# Batch Folder Analysis
+# ---------------------------------------------------------------------------
+
+def run_batch(args: argparse.Namespace):
+    """Handle batch folder analysis."""
+    folder = args.folder
+    if not os.path.isdir(folder):
+        print(f"[ERROR] Folder not found: {folder}", file=sys.stderr)
+        sys.exit(1)
+
+    eml_files = [f for f in os.listdir(folder) if f.lower().endswith('.eml')] # type: ignore
+    if not eml_files:
+        print(f"[ERROR] No .eml files found in: {folder}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"[*] Found {len(eml_files)} .eml file(s) in {folder}", file=sys.stderr) # type: ignore
+
+    results = []
+    for filename in sorted(eml_files): # type: ignore
+        file_path = os.path.join(folder, filename) # type: ignore
+        print(f"[*] Analyzing {filename} ...", file=sys.stderr)
+        try:
+            parsed = parse_eml(file_path) # type: ignore
+            report = analyze(parsed, file_path, run_intel=not args.no_intel) # type: ignore
+            results.append(report) # type: ignore
+
+            # Print full report per file if verbose
+            if args.verbose:
+                print_text_report(report)
+
+        except Exception as e:
+            results.append({"file": filename, "error": str(e)}) # type: ignore
+
+    # Always print summary
+    summary = print_batch_summary(results)
+
+    # Save summary to disk if -O specified
+    if args.save_output:
+        with open(args.save_output, 'w', encoding='utf-8') as f:
+            f.write(summary)
+        print(f"[*] Summary saved to: {args.save_output}", file=sys.stderr)
+
+    # Export CSV if --csv specified
+    if args.csv:
+        export_csv(results, args.csv)
+
+
+# ---------------------------------------------------------------------------
+# CLI Entry Point
+# ---------------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser(
@@ -78,48 +235,68 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python main.py -f email.eml                  # Basic analysis
-  python main.py -f email.eml -o json          # JSON output
-  python main.py -f email.eml -o html          # HTML report
-  python main.py -f email.eml --no-intel       # Offline mode
-  python main.py -f email.eml -o json | jq .  # Parse with jq
+  python main.py -f email.eml                          # Single file, text output
+  python main.py -f email.eml -o json                  # JSON output
+  python main.py -f email.eml -o html -O report.html   # Save HTML report
+  python main.py -f email.eml -n                       # Offline mode
+  python main.py -F samples/                           # Batch folder
+  python main.py -F samples/ -n -V                     # Batch with full details
+  python main.py -F samples/ -n --csv results.csv      # Batch with CSV export
+  python main.py -F samples/ -n -O summary.txt         # Save batch summary
         """
     )
-    parser.add_argument("-f", "--file", required=True, help="Path to the .eml file to analyze")
+
+    # Input — mutually exclusive: single file or folder
+    input_group = parser.add_mutually_exclusive_group(required=True)
+    input_group.add_argument("-f", "--file",   help="Path to a single .eml file to analyze")
+    input_group.add_argument("-F", "--folder", help="Path to a folder of .eml files for batch analysis")
+
+    # Output format (single file mode)
     parser.add_argument(
         "-o", "--output",
-        choices=["json", "text", "html", "cef"],
+        choices=["text", "json", "html", "cef"],
         default="text",
-        help="Output format: text (default), json, html, or cef"
+        help="Output format: text (default), json, html, cef"
     )
-    parser.add_argument("--no-intel", action="store_true",
-                        help="Skip AbuseIPDB / VirusTotal lookups (offline mode)")
-    parser.add_argument("--html-out", default=None,
-                        help="When using -o html, path to save the HTML file (default: print to stdout)")
-    parser.add_argument("-v", "--version", action="version", version="PhishGuard 0.2.0")
+
+    # Save output to disk
+    parser.add_argument(
+        "-O", "--save-output",
+        metavar="PATH",
+        default=None,
+        help="Save output to disk (single: saves report, batch: saves summary)"
+    )
+
+    # Threat intel
+    parser.add_argument(
+        "-n", "--no-intel",
+        action="store_true",
+        help="Skip AbuseIPDB / VirusTotal lookups (offline mode)"
+    )
+
+    # Verbose (batch mode)
+    parser.add_argument(
+        "-V", "--verbose",
+        action="store_true",
+        help="(Batch mode) Print full report for each file, not just summary"
+    )
+
+    # CSV export (batch mode)
+    parser.add_argument(
+        "--csv",
+        metavar="PATH",
+        default=None,
+        help="(Batch mode) Export results to a CSV file"
+    )
+
+    parser.add_argument("--version", action="version", version="PhishGuard 0.2.0")
 
     args = parser.parse_args()
 
-    if not os.path.isfile(args.file):
-        print(f"[ERROR] File not found: {args.file}", file=sys.stderr)
-        sys.exit(1)
-
-    print(f"[*] Parsing {args.file} ...", file=sys.stderr)
-    parsed = parse_eml(args.file)
-    report = analyze(parsed, args.file, run_intel=not args.no_intel)
-
-    if args.output == "json":
-        print(json.dumps(report, indent=2))
-    elif args.output == "html":
-        html = generate_html_report(report, output_path=args.html_out)
-        if not args.html_out:
-            print(html)
-        else:
-            print(f"[*] HTML report saved to: {args.html_out}", file=sys.stderr)
-    elif args.output == "cef":
-        print(generate_cef_log(report))
+    if args.folder:
+        run_batch(args)
     else:
-        print_text_report(report)
+        run_single(args)
 
 
 if __name__ == "__main__":
