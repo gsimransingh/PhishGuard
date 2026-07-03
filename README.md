@@ -35,7 +35,10 @@ PhishGuard/
 │   ├── threat_intel.py          # AbuseIPDB & VirusTotal API integrations
 │   └── report_generator.py      # HTML report & CEF log generation
 └── samples/
-    └── phishing_test.eml        # Sample phishing email for testing
+    ├── phishing_test.eml        # Sample phishing email (PayPal spoof)
+    ├── phishing_amazon.eml      # Sample phishing email (Amazon spoof)
+    ├── suspicious_email.eml     # Sample borderline/suspicious email
+    └── legitimate_email.eml     # Sample clean email (for false-positive testing)
 ```
 
 ---
@@ -86,18 +89,29 @@ python main.py -f samples/phishing_test.eml -o html --html-out report.html
 python main.py -f samples/phishing_test.eml -o cef
 
 # Offline mode (skip API calls)
-python main.py -f samples/phishing_test.eml --no-intel
+python main.py -f samples/phishing_test.eml -n
+
+# Batch analyze a folder of .eml files
+python main.py -F samples/ -V
+
+# Batch analyze and export a CSV summary
+python main.py -F samples/ --csv results.csv
 ```
 
 ### CLI Options
 
 | Flag | Description |
 |------|-------------|
-| `-f`, `--file` | Path to the `.eml` file (required) |
+| `-f`, `--file` | Path to a single `.eml` file (required unless `-F` is used) |
+| `-F`, `--folder` | Path to a folder of `.eml` files for batch analysis |
 | `-o`, `--output` | Output format: `text` (default), `json`, `html`, or `cef` |
-| `--no-intel` | Skip AbuseIPDB / VirusTotal lookups (offline mode) |
-| `--html-out` | File path to save HTML report (used with `-o html`) |
-| `-v`, `--version` | Show version and exit |
+| `-O`, `--save-output` | Save report to disk (single file: saves the report; batch: saves a summary) |
+| `-n`, `--no-intel` | Skip AbuseIPDB / VirusTotal lookups (offline mode) |
+| `-V`, `--verbose` | Batch mode only — print the full report per file instead of a one-line summary |
+| `--csv` | Batch mode only — export results to a CSV file |
+| `--version` | Show version and exit |
+
+Batch mode (`-F`) is meant for triaging a folder of reported emails at once.
 
 ---
 
@@ -196,24 +210,47 @@ PhishGuard calculates a risk score based on weighted flags:
 
 ## Roadmap
 
+PhishGuard's long-term vision is a full anti-phishing ecosystem, not just an email tool. The original phase plan put URL/domain analysis first (Phase 1) and email analysis later (Phase 3). In practice, development started with email analysis since phishing most commonly arrives that way, and the auth-header, IOC extraction, and risk-scoring logic built for it are reusable for URL/domain analysis too. The phases below reflect actual status, not build order.
+
+**Foundation (built first, functionality originally scoped as Phase 3)**
 - [x] `.eml` parsing — headers, body, URLs, IPs, attachments
 - [x] SPF / DKIM / DMARC header validation
 - [x] Live DNS SPF/DMARC record validation
-- [x] Risk scoring engine with weighted flags
+- [x] Risk scoring engine with weighted, explainable flags
 - [x] AbuseIPDB integration for IP reputation checks
 - [x] VirusTotal integration for URL/domain checks
-- [x] Offline mode (`--no-intel`)
-- [x] JSON output (SIEM-ready)
-- [x] HTML report output
-- [x] CEF log output (SIEM ingestion)
-- [x] Clean package architecture (`analyzer.py` as core engine)
+- [x] Offline mode (`-n` / `--no-intel`)
+- [x] Text, JSON, HTML, and CEF report output
+- [x] Batch analysis of a folder of `.eml` files (`-F`), with CSV export and verbose mode
+- [x] Clean package architecture (`analyzer.py` as core engine, decoupled from CLI)
 - [x] Full type hints across all modules
-- [ ] Batch analysis (analyze a folder of `.eml` files)
-- [ ] Async DNS and threat intel lookups
-- [ ] Export alerts to CSV
+- [ ] Automated test suite (pytest) — not yet started, next priority regardless of phase
+
+**Phase 1 — URL & domain analysis (next up)**
+- [ ] Standalone URL/domain input mode (no `.eml` required)
+- [ ] Typosquatting / homograph detection
+- [ ] Domain age / WHOIS lookup
+- [ ] Suspicious TLD and URL structure checks (IP-as-hostname, excessive subdomains, `@` tricks)
+- [ ] SSL/TLS certificate inspection
+- [ ] Security scoring reused/extended from the existing risk engine
+
+**Phase 2 — Threat intelligence & heuristics**
+- [ ] Expanded reputation sources beyond AbuseIPDB/VirusTotal
+- [ ] Advanced heuristics (redirect chain analysis, brand impersonation detection)
+- [ ] Reporting improvements
+
+**Phase 3 — ML, browser extension, API platform**
+- [x] Email analysis *(delivered early — see Foundation above)*
 - [ ] Machine learning assisted scoring
 - [ ] Browser extension
-- [ ] REST API / web interface
+- [ ] REST API / web platform
+- [ ] Async DNS and threat intel lookups
+
+**Phase 4 — Community & enterprise**
+- [ ] Community phishing reporting
+- [ ] Threat dashboards
+- [ ] Real-time monitoring
+- [ ] Enterprise features
 
 ---
 
