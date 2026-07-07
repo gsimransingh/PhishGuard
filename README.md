@@ -22,7 +22,7 @@ Given a `.eml` file, PhishGuard will:
 
 ## Project Structure
 
-```
+```text
 PhishGuard/
 ├── main.py                      # Entry point (thin wrapper)
 ├── requirements.txt             # Dependencies
@@ -64,6 +64,7 @@ export VIRUSTOTAL_API_KEY="your_key_here"
 ```
 
 **Windows (PowerShell):**
+
 ```powershell
 $env:ABUSEIPDB_API_KEY="your_key_here"
 $env:VIRUSTOTAL_API_KEY="your_key_here"
@@ -101,7 +102,7 @@ python main.py -F samples/ --csv results.csv
 ### CLI Options
 
 | Flag | Description |
-|------|-------------|
+| ------ | ------------- |
 | `-f`, `--file` | Path to a single `.eml` file (required unless `-F` is used) |
 | `-F`, `--folder` | Path to a folder of `.eml` files for batch analysis |
 | `-o`, `--output` | Output format: `text` (default), `json`, `html`, or `cef` |
@@ -118,7 +119,7 @@ Batch mode (`-F`) is meant for triaging a folder of reported emails at once.
 ## Output Formats
 
 | Format | Use Case |
-|--------|----------|
+| -------- | ---------- |
 | `text` | Human-readable terminal output for quick triage |
 | `json` | SIEM integration, scripting, programmatic access |
 | `html` | Shareable visual reports for stakeholders |
@@ -131,7 +132,7 @@ Batch mode (`-F`) is meant for triaging a folder of reported emails at once.
 PhishGuard calculates a risk score based on weighted flags:
 
 | Check | Score |
-|-------|-------|
+| ------- | ------- |
 | SPF fail / softfail | +30 |
 | SPF header missing | +15 |
 | DKIM signature missing | +20 |
@@ -147,7 +148,7 @@ PhishGuard calculates a risk score based on weighted flags:
 | Malicious URL (VirusTotal) | +40 |
 
 | Score | Risk Level |
-|-------|------------|
+| ------- | ------------ |
 | 0–34 | LOW |
 | 35–69 | MEDIUM |
 | 70+ | HIGH |
@@ -157,7 +158,8 @@ PhishGuard calculates a risk score based on weighted flags:
 ## Sample Output
 
 **Text:**
-```
+
+```text
 ============================================================
   PhishGuard v0.2.0 - Analysis Report
   Risk Level : HIGH (score: 115)
@@ -172,6 +174,7 @@ PhishGuard calculates a risk score based on weighted flags:
 ```
 
 **JSON:**
+
 ```json
 {
   "tool": "PhishGuard",
@@ -212,7 +215,8 @@ PhishGuard calculates a risk score based on weighted flags:
 
 PhishGuard's long-term vision is a full anti-phishing ecosystem, not just an email tool. The original phase plan put URL/domain analysis first (Phase 1) and email analysis later (Phase 3). In practice, development started with email analysis since phishing most commonly arrives that way, and the auth-header, IOC extraction, and risk-scoring logic built for it are reusable for URL/domain analysis too. The phases below reflect actual status, not build order.
 
-**Foundation (built first, functionality originally scoped as Phase 3)**
+### Foundation (built first, functionality originally scoped as Phase 3)
+
 - [x] `.eml` parsing — headers, body, URLs, IPs, attachments
 - [x] SPF / DKIM / DMARC header validation
 - [x] Live DNS SPF/DMARC record validation
@@ -226,7 +230,8 @@ PhishGuard's long-term vision is a full anti-phishing ecosystem, not just an ema
 - [x] Full type hints across all modules
 - [ ] Automated test suite (pytest) — not yet started, next priority regardless of phase
 
-**Phase 1 — URL & domain analysis (next up)**
+### Phase 1 — URL & domain analysis (next up)
+
 - [ ] Standalone URL/domain input mode (no `.eml` required)
 - [ ] Typosquatting / homograph detection
 - [ ] Domain age / WHOIS lookup
@@ -234,19 +239,22 @@ PhishGuard's long-term vision is a full anti-phishing ecosystem, not just an ema
 - [ ] SSL/TLS certificate inspection
 - [ ] Security scoring reused/extended from the existing risk engine
 
-**Phase 2 — Threat intelligence & heuristics**
+### Phase 2 — Threat intelligence & heuristics
+
 - [ ] Expanded reputation sources beyond AbuseIPDB/VirusTotal
 - [ ] Advanced heuristics (redirect chain analysis, brand impersonation detection)
 - [ ] Reporting improvements
 
-**Phase 3 — ML, browser extension, API platform**
+### Phase 3 — ML, browser extension, API platform
+
 - [x] Email analysis *(delivered early — see Foundation above)*
 - [ ] Machine learning assisted scoring
 - [ ] Browser extension
 - [ ] REST API / web platform
 - [ ] Async DNS and threat intel lookups
 
-**Phase 4 — Community & enterprise**
+### Phase 4 — Community & enterprise
+
 - [ ] Community phishing reporting
 - [ ] Threat dashboards
 - [ ] Real-time monitoring
