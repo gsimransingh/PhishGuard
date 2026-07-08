@@ -31,9 +31,12 @@ PhishGuard/
 │   ├── analyzer.py              # Core analysis engine & risk scoring
 │   ├── cli.py                   # CLI argument parsing & output formatting
 │   ├── email_parser.py          # .eml parsing & IOC extraction
+│   ├── url_analyzer.py          # Standalone URL/domain analysis (Phase 1)
 │   ├── dns_validator.py         # Live SPF & DMARC DNS lookups
 │   ├── threat_intel.py          # AbuseIPDB & VirusTotal API integrations
-│   └── report_generator.py      # HTML report & CEF log generation
+│   ├── report_generator.py      # HTML report & CEF log generation
+│   └── data/
+│       └── known_brands.json    # Configurable brand list for typosquat detection
 └── samples/
     ├── phishing_test.eml        # Sample phishing email (PayPal spoof)
     ├── phishing_amazon.eml      # Sample phishing email (Amazon spoof)
@@ -84,7 +87,7 @@ python main.py -f samples/phishing_test.eml
 python main.py -f samples/phishing_test.eml -o json
 
 # HTML report (save to file)
-python main.py -f samples/phishing_test.eml -o html --html-out report.html
+python main.py -f samples/phishing_test.eml -o html -O report.html
 
 # CEF log (for SIEM ingestion)
 python main.py -f samples/phishing_test.eml -o cef
@@ -97,14 +100,23 @@ python main.py -F samples/ -V
 
 # Batch analyze and export a CSV summary
 python main.py -F samples/ --csv results.csv
+
+# Standalone URL/domain analysis — no .eml file needed
+python main.py -u paypa1-verify.com
+
+# Offline URL analysis, JSON output
+python main.py -u http://evil.ru/login -n -o json
 ```
+
+Standalone URL analysis (`-u`) checks structure (IP-as-hostname, `@` tricks, suspicious TLDs), punycode/homograph patterns, and typosquatting/combosquatting against a configurable brand list in `phishguard/data/known_brands.json`. With intel enabled (the default, skip with `-n`), it also does a live RDAP domain-age lookup. Every finding it returns comes with its own weight, confidence level, and a note on when that specific check can false-positive — check the report output (or `phishguard/url_analyzer.py`'s docstrings) rather than trusting the score blindly.
 
 ### CLI Options
 
 | Flag | Description |
 | ------ | ------------- |
-| `-f`, `--file` | Path to a single `.eml` file (required unless `-F` is used) |
+| `-f`, `--file` | Path to a single `.eml` file (required unless `-F` or `-u` is used) |
 | `-F`, `--folder` | Path to a folder of `.eml` files for batch analysis |
+| `-u`, `--url` | A single URL or bare domain to analyze (no `.eml` file needed) |
 | `-o`, `--output` | Output format: `text` (default), `json`, `html`, or `cef` |
 | `-O`, `--save-output` | Save report to disk (single file: saves the report; batch: saves a summary) |
 | `-n`, `--no-intel` | Skip AbuseIPDB / VirusTotal lookups (offline mode) |
@@ -230,14 +242,18 @@ PhishGuard's long-term vision is a full anti-phishing ecosystem, not just an ema
 - [x] Full type hints across all modules
 - [ ] Automated test suite (pytest) — not yet started, next priority regardless of phase
 
-### Phase 1 — URL & domain analysis (next up)
+### Phase 1 — URL & domain analysis (in progress)
 
-- [ ] Standalone URL/domain input mode (no `.eml` required)
-- [ ] Typosquatting / homograph detection
-- [ ] Domain age / WHOIS lookup
-- [ ] Suspicious TLD and URL structure checks (IP-as-hostname, excessive subdomains, `@` tricks)
+- [x] Standalone URL/domain input mode (`-u` / `--url`, no `.eml` required)
+- [x] URL structure checks (IP-as-hostname, `@` tricks, excessive subdomains, non-standard port)
+- [x] Suspicious TLD detection
+- [x] Punycode/homograph detection (`xn--` prefix)
+- [x] Typosquatting detection (edit distance against `known_brands.json`)
+- [x] Combosquatting detection (brand substring in non-brand domain)
+- [x] Domain age lookup via RDAP, gated behind `-n`/`--no-intel`
 - [ ] SSL/TLS certificate inspection
-- [ ] Security scoring reused/extended from the existing risk engine
+- [ ] Public-suffix-aware domain parsing (current registrable-domain extraction is a naive last-two-labels split — see `url_analyzer.py` module docstring for the known false positive/negative it causes on ccTLDs like `.co.uk`)
+- [ ] Wire URL findings into the email analyzer's scoring (currently `analyzer.py` only does a crude keyword match on URLs found in emails; the new structural/typosquat checks aren't used there yet)
 
 ### Phase 2 — Threat intelligence & heuristics
 

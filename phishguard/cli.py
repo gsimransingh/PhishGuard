@@ -14,6 +14,7 @@ from datetime import datetime
 
 from phishguard.email_parser import parse_eml # type: ignore
 from phishguard.analyzer import analyze # type: ignore
+from phishguard.url_analyzer import analyze_url # type: ignore
 from phishguard.report_generator import generate_html_report, generate_cef_log # type: ignore
 
 
@@ -83,7 +84,42 @@ def print_text_report(report: dict, out=sys.stdout) -> str: # type: ignore
     return output
 
 
-def print_batch_summary(results: list[dict], out=sys.stdout) -> str: # type: ignore
+def print_url_report(report: dict, out=sys.stdout) -> str: # type: ignore
+    """Print a human-readable summary of a standalone URL analysis."""
+    sep = "=" * 60
+    lines = []
+    lines.append(sep) # type: ignore
+    lines.append("  PhishGuard - URL Analysis Report") # type: ignore
+    lines.append(f"  URL        : {report['url']}") # type: ignore
+    lines.append(f"  Hostname   : {report['hostname']}") # type: ignore
+    lines.append(sep) # type: ignore
+    lines.append(f"  Risk Level : {report['risk_level']} (score: {report['risk_score']})") # type: ignore
+    lines.append(sep) # type: ignore
+    lines.append("  Findings:") # type: ignore
+    if report["findings"]: # type: ignore
+        for f in report["findings"]: # type: ignore
+            lines.append(f"    [!] {f['finding']}") # type: ignore
+            lines.append(f"        check={f['check']} weight={f['weight']} confidence={f['confidence']}") # type: ignore
+            lines.append(f"        note: {f['false_positive_note']}") # type: ignore
+    else:
+        lines.append("    [+] No structural, brand, or age-based flags raised.") # type: ignore
+    lines.append(sep) # type: ignore
+    lines.append("  Domain Age:") # type: ignore
+    age = report.get("domain_age") # type: ignore
+    if age: # type: ignore
+        lines.append(f"    status={age['status']} created={age.get('created')} age_days={age.get('age_days')}") # type: ignore
+        if age.get("error"): # type: ignore
+            lines.append(f"    note: {age['error']}") # type: ignore
+    else:
+        lines.append("    (skipped — offline mode or no hostname)") # type: ignore
+    lines.append(sep) # type: ignore
+
+    output = "\n".join(lines) # type: ignore
+    print(output, file=out)
+    return output
+
+
+
     """Print a summary table of batch analysis results."""
     sep = "=" * 70
     lines = []
@@ -178,6 +214,30 @@ def run_single(args: argparse.Namespace):
 
 
 # ---------------------------------------------------------------------------
+# Standalone URL Analysis
+# ---------------------------------------------------------------------------
+
+def run_url(args: argparse.Namespace):
+    """Handle standalone URL/domain analysis (no .eml file required)."""
+    print(f"[*] Analyzing URL: {args.url} ...", file=sys.stderr)
+    report = analyze_url(args.url, run_intel=not args.no_intel) # type: ignore
+
+    if args.output == "json":
+        content = json.dumps(report, indent=2)
+        print(content)
+    elif args.output in ("html", "cef"):
+        print(f"[ERROR] Output format '{args.output}' is not yet supported for URL analysis (-u). Use text or json.", file=sys.stderr)
+        sys.exit(1)
+    else:
+        content = print_url_report(report)
+
+    if args.save_output:
+        with open(args.save_output, 'w', encoding='utf-8') as f:
+            f.write(content)
+        print(f"[*] Output saved to: {args.save_output}", file=sys.stderr)
+
+
+# ---------------------------------------------------------------------------
 # Batch Folder Analysis
 # ---------------------------------------------------------------------------
 
@@ -243,13 +303,16 @@ Examples:
   python main.py -F samples/ -n -V                     # Batch with full details
   python main.py -F samples/ -n --csv results.csv      # Batch with CSV export
   python main.py -F samples/ -n -O summary.txt         # Save batch summary
+  python main.py -u paypa1-verify.com                  # Standalone URL/domain analysis
+  python main.py -u http://evil.ru/login -n -o json    # Offline URL analysis, JSON output
         """
     )
 
-    # Input — mutually exclusive: single file or folder
+    # Input — mutually exclusive: single file, folder, or standalone URL
     input_group = parser.add_mutually_exclusive_group(required=True)
     input_group.add_argument("-f", "--file",   help="Path to a single .eml file to analyze")
     input_group.add_argument("-F", "--folder", help="Path to a folder of .eml files for batch analysis")
+    input_group.add_argument("-u", "--url",    help="A single URL or bare domain to analyze (no .eml file needed)")
 
     # Output format (single file mode)
     parser.add_argument(
@@ -293,7 +356,9 @@ Examples:
 
     args = parser.parse_args()
 
-    if args.folder:
+    if args.url:
+        run_url(args)
+    elif args.folder:
         run_batch(args)
     else:
         run_single(args)

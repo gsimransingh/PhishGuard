@@ -1,0 +1,25 @@
+{
+  "_comment": "Brand names checked for typosquatting/combosquatting in url_analyzer.py. Lowercase, no TLD. Extend this list freely as new targeted brands come up, no code changes needed.",
+  "brands": [
+    "paypal",
+    "amazon",
+    "microsoft",
+    "google",
+    "apple",
+    "facebook",
+    "instagram",
+    "netflix",
+    "linkedin",
+    "dropbox",
+    "docusign",
+    "chase",
+    "bankofamerica",
+    "wellsfargo",
+    "irs",
+    "outlook",
+    "office365",
+    "adobe",
+    "ebay",
+    "steam"
+  ]
+}
