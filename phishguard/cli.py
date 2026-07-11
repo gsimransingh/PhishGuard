@@ -104,12 +104,16 @@ def print_url_report(report: dict, out=sys.stdout) -> str: # type: ignore
     else:
         lines.append("    [+] No structural, brand, or age-based flags raised.") # type: ignore
     lines.append(sep) # type: ignore
-    lines.append("  Domain Age:") # type: ignore
-    age = report.get("domain_age") # type: ignore
-    if age: # type: ignore
-        lines.append(f"    status={age['status']} created={age.get('created')} age_days={age.get('age_days')}") # type: ignore
-        if age.get("error"): # type: ignore
-            lines.append(f"    note: {age['error']}") # type: ignore
+    lines.append("  Domain Registration:") # type: ignore
+    reg = report.get("domain_registration") # type: ignore
+    if reg: # type: ignore
+        lines.append(f"    status={reg['status']} created={reg.get('created')} expires={reg.get('expires')}") # type: ignore
+        lines.append(f"    age_days={reg.get('age_days')} registration_period_days={reg.get('registration_period_days')}") # type: ignore
+        lines.append(f"    registrar={reg.get('registrar') or 'unknown'} (context only, not scored)") # type: ignore
+        if reg.get("domain_status"): # type: ignore
+            lines.append(f"    domain_status={reg['domain_status']}") # type: ignore
+        if reg.get("error"): # type: ignore
+            lines.append(f"    note: {reg['error']}") # type: ignore
     else:
         lines.append("    (skipped — offline mode or no hostname)") # type: ignore
     lines.append(sep) # type: ignore

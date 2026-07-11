@@ -22,7 +22,11 @@ Checks implemented
 2. Punycode/homograph - xn-- prefix detection
 3. Typosquatting / combosquatting - edit distance + substring match against
                          a configurable brand list (phishguard/data/known_brands.json)
-4. Domain age (RDAP)  - network call, gated behind run_intel
+4. Domain registration  - RDAP lookup: age, registration period length, and
+                         EPP status codes. Network call, gated behind run_intel.
+                         Registrar name is captured for analyst context but
+                         intentionally NOT scored (see check_domain_registration
+                         docstring for why).
 
 Known limitations (read before trusting the score)
 ----------------------------------------------------
@@ -242,8 +246,15 @@ def check_typosquatting(hostname: str, brands: Optional[list] = None) -> list:
         if not main_label or main_label == brand:
             continue  # empty, or it IS the real brand domain — nothing to flag
 
+        if len(brand) <= 3:
+            # Short brand names (e.g. "att", "ups") are too generic for a
+            # substring/edit-distance check — they'd match inside ordinary
+            # words ("attack", "upstairs") and flood the report with noise.
+            # This guard applies to both typosquat and combosquat checks below.
+            continue
+
         distance = _levenshtein(main_label, brand)
-        if 0 < distance <= 2 and len(brand) > 3:
+        if 0 < distance <= 2:
             findings.append({
                 "check": "typosquatting",
                 "finding": f"Domain label '{main_label}' is very close to known brand '{brand}' (edit distance {distance})",
@@ -270,19 +281,44 @@ def check_typosquatting(hostname: str, brands: Optional[list] = None) -> list:
 # Check 4: Domain age (RDAP) — the only network call in this module
 # ---------------------------------------------------------------------------
 
-def check_domain_age(hostname: str, timeout: int = 8) -> dict:
+def check_domain_registration(hostname: str, timeout: int = 8) -> dict:
     """
-    Live RDAP lookup for domain registration date.
+    Live RDAP lookup for domain registration details: creation date,
+    expiration date, registrar name, and EPP status codes. One network call,
+    several signals extracted from it.
 
-    False positives: essentially none — if RDAP reports an age, it's accurate.
+    Why not just "check if the registrar is legit": registrar identity alone
+    is a bad signal. Namecheap, GoDaddy, NameSilo, Cloudflare Registrar, etc.
+    host millions of completely legitimate domains and are popular with
+    attackers for the same reason legitimate users like them (cheap, fast,
+    no vetting friction). A hardcoded "sketchy registrar" list would flag
+    huge swaths of the legitimate internet and make unsupportable claims
+    about specific companies. Registrar name is returned here for an
+    analyst's context, but intentionally NOT scored.
 
-    False negatives / blind spots: many registrars redact creation dates
-    behind GDPR privacy proxies, and RDAP coverage varies by TLD/registry, so
-    a "no data" result is common. This must NOT be treated as suspicious on
-    its own — it means this check contributes nothing, not that something's
-    wrong. A brand-new domain is also not inherently malicious (new legitimate
-    businesses register domains too), so age alone should never carry a
-    high weight — it's a supporting signal, not a verdict.
+    What IS scored instead, using data from the same RDAP response:
+
+    1. Short registration period + young age: phishing domains are almost
+       always registered for the minimum period (1 year) since they're
+       throwaway assets. A domain registered yesterday for 5 years is a
+       much stronger "real business" signal than one registered yesterday
+       for exactly 365 days. This is a supporting signal, combined with age,
+       not scored alone.
+    2. EPP status codes indicating the registrar itself has already taken
+       action (clientHold, serverHold, pendingDelete, redemptionPeriod).
+       This is a stronger signal than our own heuristics since it reflects
+       an action the registrar took, not a guess we're making.
+
+    False positives: a short registration period alone is common for
+    legitimate new projects, side businesses, and personal sites too — most
+    people don't pay for multi-year registration by default. Status-code
+    holds can also result from billing disputes or transfer processes
+    unrelated to abuse.
+
+    False negatives / blind spots: many registrars redact creation/expiry
+    dates behind GDPR privacy proxies, and RDAP coverage varies by
+    TLD/registry, so "no data" is common and must NOT be treated as
+    suspicious on its own.
     """
     registrable = _registrable_domain(hostname)
     try:
@@ -290,36 +326,76 @@ def check_domain_age(hostname: str, timeout: int = 8) -> dict:
         if resp.status_code != 200:
             return {
                 "domain": registrable, "status": "unavailable",
-                "created": None, "age_days": None,
-                "error": f"RDAP returned HTTP {resp.status_code}",
+                "created": None, "expires": None, "age_days": None,
+                "registration_period_days": None, "registrar": None,
+                "domain_status": [], "error": f"RDAP returned HTTP {resp.status_code}",
             }
 
         data = resp.json()
+
         created = None
+        expires = None
         for event in data.get("events", []):
-            if event.get("eventAction") == "registration":
+            action = event.get("eventAction")
+            if action == "registration":
                 created = event.get("eventDate")
+            elif action == "expiration":
+                expires = event.get("eventDate")
+
+        registrar = None
+        for entity in data.get("entities", []):
+            if "registrar" in entity.get("roles", []):
+                vcard = entity.get("vcardArray")
+                if vcard and len(vcard) > 1:
+                    for field in vcard[1]:
+                        if field[0] == "fn":
+                            registrar = field[3]
+                            break
                 break
+
+        domain_status = data.get("status", [])
 
         if not created:
             return {
                 "domain": registrable, "status": "no_data",
-                "created": None, "age_days": None,
+                "created": None, "expires": expires, "age_days": None,
+                "registration_period_days": None, "registrar": registrar,
+                "domain_status": domain_status,
                 "error": "No registration date in RDAP response (often GDPR-redacted)",
             }
 
         created_dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
         age_days = (datetime.now(timezone.utc) - created_dt).days
+
+        registration_period_days = None
+        if expires:
+            expires_dt = datetime.fromisoformat(expires.replace("Z", "+00:00"))
+            registration_period_days = (expires_dt - created_dt).days
+
         return {
             "domain": registrable, "status": "found",
-            "created": created, "age_days": age_days, "error": None,
+            "created": created, "expires": expires, "age_days": age_days,
+            "registration_period_days": registration_period_days,
+            "registrar": registrar, "domain_status": domain_status,
+            "error": None,
         }
 
     except requests.RequestException as e:
         return {
             "domain": registrable, "status": "error",
-            "created": None, "age_days": None, "error": str(e),
+            "created": None, "expires": None, "age_days": None,
+            "registration_period_days": None, "registrar": None,
+            "domain_status": [], "error": str(e),
         }
+
+
+# EPP status codes indicating the registrar has already restricted a domain,
+# typically due to abuse reports, disputes, or non-renewal. Note: some
+# non-abuse-related reasons (billing, disputes) also produce these; this is a
+# support signal, not a definitive verdict on its own.
+_ABUSE_RELATED_STATUS_CODES = {
+    "clienthold", "serverhold", "pendingdelete", "redemptionperiod",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -333,13 +409,13 @@ def analyze_url(url: str, run_intel: bool = True) -> dict:
     Args:
         url:       The URL or bare domain to analyze (e.g. "paypa1.com" or
                    "http://paypal-verify.evil.ru/login").
-        run_intel: If True, performs the RDAP domain-age lookup (the one
-                   network call). Same convention as --no-intel elsewhere
+        run_intel: If True, performs the RDAP domain registration lookup (the
+                   one network call). Same convention as --no-intel elsewhere
                    in PhishGuard — set False for offline/fast use.
 
     Returns:
         dict with risk_score, risk_level, every finding (each independently
-        explainable), and the domain_age result if run_intel was True.
+        explainable), and the domain_registration result if run_intel was True.
     """
     if not re.match(r"^https?://", url, re.IGNORECASE):
         url = "http://" + url  # allow bare domains like "example.com"
@@ -352,17 +428,42 @@ def analyze_url(url: str, run_intel: bool = True) -> dict:
     findings += check_punycode_homograph(hostname)
     findings += check_typosquatting(hostname)
 
-    domain_age = None
+    domain_registration = None
     if run_intel and hostname:
-        domain_age = check_domain_age(hostname)
-        if domain_age["status"] == "found" and domain_age["age_days"] is not None and domain_age["age_days"] < 60:
-            findings.append({
-                "check": "young_domain",
-                "finding": f"Domain was registered {domain_age['age_days']} day(s) ago",
-                "weight": 20,
-                "confidence": "medium",
-                "false_positive_note": "New legitimate businesses/products also register recently; treat alongside other flags, not alone.",
-            })
+        domain_registration = check_domain_registration(hostname)
+
+        if domain_registration["status"] == "found":
+            age_days = domain_registration["age_days"]
+            period_days = domain_registration["registration_period_days"]
+
+            if age_days is not None and age_days < 60:
+                findings.append({
+                    "check": "young_domain",
+                    "finding": f"Domain was registered {age_days} day(s) ago",
+                    "weight": 20,
+                    "confidence": "medium",
+                    "false_positive_note": "New legitimate businesses/products also register recently; treat alongside other flags, not alone.",
+                })
+
+            if age_days is not None and age_days < 60 and period_days is not None and period_days <= 366:
+                findings.append({
+                    "check": "short_registration_period",
+                    "finding": f"Domain is both new ({age_days} days old) and registered for only ~{period_days} days, the minimum period — a common pattern for throwaway phishing domains",
+                    "weight": 15,
+                    "confidence": "low",
+                    "false_positive_note": "Most individuals and small legitimate projects also register for just 1 year by default; only meaningful combined with the domain also being brand-new.",
+                })
+
+            status_codes = {s.lower() for s in domain_registration.get("domain_status", [])}
+            hit_codes = status_codes & _ABUSE_RELATED_STATUS_CODES
+            if hit_codes:
+                findings.append({
+                    "check": "registrar_restriction",
+                    "finding": f"Registrar has placed a restriction on this domain: {', '.join(sorted(hit_codes))}",
+                    "weight": 25,
+                    "confidence": "medium",
+                    "false_positive_note": "Can also result from billing disputes, ownership transfers, or non-renewal — not always abuse-related.",
+                })
 
     score = sum(f["weight"] for f in findings)
     if score >= 70:
@@ -379,5 +480,6 @@ def analyze_url(url: str, run_intel: bool = True) -> dict:
         "risk_score": score,
         "risk_level": risk_level,
         "findings": findings,
-        "domain_age": domain_age,
+        "domain_registration": domain_registration,
     }
+    
