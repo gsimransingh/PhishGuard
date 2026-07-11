@@ -26,6 +26,8 @@ Given a `.eml` file, PhishGuard will:
 PhishGuard/
 ├── main.py                      # Entry point (thin wrapper)
 ├── requirements.txt             # Dependencies
+├── requirements-dev.txt         # Dev dependencies (pytest)
+├── pytest.ini                   # Test discovery & sys.path config
 ├── phishguard/
 │   ├── __init__.py              # Package metadata
 │   ├── analyzer.py              # Core analysis engine & risk scoring
@@ -37,11 +39,16 @@ PhishGuard/
 │   ├── report_generator.py      # HTML report & CEF log generation
 │   └── data/
 │       └── known_brands.json    # Configurable brand list for typosquat detection
-└── samples/
-    ├── phishing_test.eml        # Sample phishing email (PayPal spoof)
-    ├── phishing_amazon.eml      # Sample phishing email (Amazon spoof)
-    ├── suspicious_email.eml     # Sample borderline/suspicious email
-    └── legitimate_email.eml     # Sample clean email (for false-positive testing)
+├── samples/
+│   ├── phishing_test.eml        # Sample phishing email (PayPal spoof)
+│   ├── phishing_amazon.eml      # Sample phishing email (Amazon spoof)
+│   ├── suspicious_email.eml     # Sample borderline/suspicious email
+│   └── legitimate_email.eml     # Sample clean email (for false-positive testing)
+└── tests/
+    ├── conftest.py              # Shared fixtures & network isolation
+    ├── test_email_parser.py
+    ├── test_url_analyzer.py
+    └── test_analyzer.py
 ```
 
 ---
@@ -240,7 +247,7 @@ PhishGuard's long-term vision is a full anti-phishing ecosystem, not just an ema
 - [x] Batch analysis of a folder of `.eml` files (`-F`), with CSV export and verbose mode
 - [x] Clean package architecture (`analyzer.py` as core engine, decoupled from CLI)
 - [x] Full type hints across all modules
-- [ ] Automated test suite (pytest) — not yet started, next priority regardless of phase
+- [x] Automated test suite (pytest) — 76 tests across email_parser, url_analyzer, and analyzer, all network calls mocked
 
 ### Phase 1 — URL & domain analysis (in progress)
 
@@ -284,4 +291,4 @@ This tool is intended for **educational and defensive security purposes only**. 
 
 ---
 
-*Built as part of a SOC analyst portfolio project by Gursimran Singh.*
+*Built as part of a SOC analyst portfolio project by me, Gursimran Singh.*
