@@ -276,7 +276,7 @@ def run_batch(args: argparse.Namespace):
             results.append({"file": filename, "error": str(e)}) # type: ignore
 
     # Always print summary
-    summary = print_batch_summary(results)
+    summary = print_batch_summary(results) # type: ignore
 
     # Save summary to disk if -O specified
     if args.save_output:

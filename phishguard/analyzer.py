@@ -8,7 +8,7 @@ by a web API, browser extension, or any other interface in the future.
 import os
 import re
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from phishguard.threat_intel import check_ips, check_urls
@@ -54,9 +54,14 @@ def analyze(parsed: dict, file_path: str, run_intel: bool = True) -> dict:
         score += 10
 
     # --- Reply-To mismatch ---
+    # Compare extracted email addresses, not raw header strings. Comparing
+    # raw strings caused a false positive on any legitimate email where the
+    # From header includes a display name (e.g. "GitHub <noreply@github.com>")
+    # but the Reply-To header doesn't (e.g. "noreply@github.com") — same
+    # address, different string, previously flagged as a mismatch.
     sender: str = parsed.get("from", "")
     reply_to: str = parsed.get("reply_to", "")
-    if reply_to and reply_to != sender:
+    if reply_to and _extract_email_address(reply_to) != _extract_email_address(sender):
         flags.append(f"Reply-To mismatch: sender={sender}, reply_to={reply_to}")
         score += 20
 
@@ -122,7 +127,7 @@ def analyze(parsed: dict, file_path: str, run_intel: bool = True) -> dict:
     return {
         "tool":        "PhishGuard",
         "version":     "0.2.0",
-        "analyzed_at": datetime.utcnow().isoformat() + "Z",
+        "analyzed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "file":        os.path.basename(file_path),
         "risk_level":  risk_level,
         "risk_score":  score,
@@ -158,3 +163,15 @@ def _extract_domain(from_header: str) -> str:
     """Extract domain from a From: header like 'Name <user@domain.com>'."""
     match = re.search(r'@([\w.-]+)', from_header)
     return match.group(1) if match else ""
+
+
+def _extract_email_address(header_value: str) -> str:
+    """
+    Extract the bare, lowercased email address from a header value.
+    Handles both 'Name <user@domain.com>' and plain 'user@domain.com' forms,
+    so comparisons between headers (e.g. From vs Reply-To) aren't thrown off
+    by the presence or absence of a display name.
+    """
+    match = re.search(r'<([^<>]+)>', header_value)
+    address = match.group(1) if match else header_value
+    return address.strip().lower()
