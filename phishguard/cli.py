@@ -10,7 +10,7 @@ import json
 import sys
 import os
 import csv
-from datetime import datetime
+from datetime import datetime, timezone
 
 from phishguard.email_parser import parse_eml # type: ignore
 from phishguard.analyzer import analyze # type: ignore
@@ -117,6 +117,17 @@ def print_url_report(report: dict, out=sys.stdout) -> str: # type: ignore
     else:
         lines.append("    (skipped — offline mode or no hostname)") # type: ignore
     lines.append(sep) # type: ignore
+    lines.append("  SSL/TLS Certificate:") # type: ignore
+    tls = report.get("ssl_certificate") # type: ignore
+    if tls: # type: ignore
+        lines.append(f"    status={tls['status']} issuer={tls.get('issuer') or 'unknown'}") # type: ignore
+        if tls.get("not_before"): # type: ignore
+            lines.append(f"    not_before={tls['not_before']} days_since_issued={tls.get('days_since_issued')}") # type: ignore
+        if tls.get("error"): # type: ignore
+            lines.append(f"    note: {tls['error']}") # type: ignore
+    else:
+        lines.append("    (skipped — offline mode or no hostname)") # type: ignore
+    lines.append(sep) # type: ignore
 
     output = "\n".join(lines) # type: ignore
     print(output, file=out)
@@ -129,7 +140,7 @@ def print_url_report(report: dict, out=sys.stdout) -> str: # type: ignore
     lines = []
     lines.append(sep) # type: ignore
     lines.append(f"  PhishGuard - Batch Analysis Summary") # type: ignore
-    lines.append(f"  Analyzed   : {datetime.utcnow().isoformat()}Z") # type: ignore
+    lines.append(f"  Analyzed   : {datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')}") # type: ignore
     lines.append(f"  Total Files: {len(results)}") # type: ignore
     lines.append(sep) # type: ignore
     lines.append(f"  {'File':<35} {'Risk':<8} {'Score':<8} {'Flags'}") # type: ignore
@@ -276,7 +287,7 @@ def run_batch(args: argparse.Namespace):
             results.append({"file": filename, "error": str(e)}) # type: ignore
 
     # Always print summary
-    summary = print_batch_summary(results) # type: ignore
+    summary = print_batch_summary(results)
 
     # Save summary to disk if -O specified
     if args.save_output:
@@ -370,3 +381,4 @@ Examples:
 
 if __name__ == "__main__":
     main()
+    

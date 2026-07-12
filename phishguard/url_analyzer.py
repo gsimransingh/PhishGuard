@@ -27,6 +27,12 @@ Checks implemented
                          Registrar name is captured for analyst context but
                          intentionally NOT scored (see check_domain_registration
                          docstring for why).
+5. SSL/TLS certificate  - live TLS handshake against the host. Flags
+                         verification failures (self-signed, expired, unknown
+                         CA) and very recently issued certificates. Network
+                         call, gated behind run_intel. A VALID certificate is
+                         NOT a clean bill of health — see check_ssl_certificate
+                         docstring for why.
 
 Known limitations (read before trusting the score)
 ----------------------------------------------------
@@ -45,6 +51,8 @@ Known limitations (read before trusting the score)
 import json
 import os
 import re
+import socket
+import ssl
 from datetime import datetime, timezone
 from typing import Optional
 from urllib.parse import urlparse
@@ -399,6 +407,93 @@ _ABUSE_RELATED_STATUS_CODES = {
 
 
 # ---------------------------------------------------------------------------
+# Check 5: SSL/TLS certificate inspection — the second network call in this module
+# ---------------------------------------------------------------------------
+
+def check_ssl_certificate(hostname: str, port: int = 443, timeout: int = 5) -> dict:
+    """
+    Connect to the host on port 443 and inspect its TLS certificate chain.
+
+    Unlike the RDAP check, this doesn't hit a JSON API — it does a real TLS
+    handshake against the target. Two outcomes matter for phishing detection:
+
+    1. Certificate fails verification (self-signed, expired, hostname
+       mismatch, unknown CA). This uses Python's own ssl module error
+       message rather than parsing certificate internals byte-by-byte,
+       which would need an extra dependency (the `cryptography` library)
+       for a level of detail this tool doesn't need — the failure reason
+       string alone is informative enough for a SOC analyst.
+    2. Certificate is valid but was issued very recently. Attackers often
+       auto-provision a fresh Let's Encrypt cert right before launching a
+       campaign, but so does every legitimate new site and every routine
+       90-day cert renewal — so freshness alone is a weak signal, only
+       meaningful when combined with the domain also being newly registered.
+
+    False positives: legitimate internal tools, dev/staging environments,
+    and some small businesses genuinely use self-signed or otherwise
+    unverified certificates. A verification failure is suspicious, not proof.
+
+    False negatives: a phishing site can absolutely have a perfectly valid,
+    properly-issued certificate — HTTPS/a green padlock says nothing about
+    trustworthiness, it only proves encryption in transit. This check will
+    correctly find nothing wrong with a well-configured phishing site and
+    that must not be read as a clean bill of health for the domain overall.
+
+    Also: no certificate at all (plain HTTP, connection refused, timeout)
+    is NOT scored as suspicious here. Plenty of legitimate low-traffic or
+    internal sites still don't force HTTPS, and connection issues in this
+    environment specifically (firewalls, blocked ports) are common and
+    unrelated to the target's legitimacy.
+    """
+    try:
+        context = ssl.create_default_context()
+        with socket.create_connection((hostname, port), timeout=timeout) as sock:
+            with context.wrap_socket(sock, server_hostname=hostname) as ssock:
+                cert = ssock.getpeercert()
+                return _parse_verified_cert(hostname, cert)
+
+    except ssl.SSLCertVerificationError as e:
+        return {
+            "hostname": hostname, "status": "verification_failed",
+            "issuer": None, "not_before": None, "not_after": None,
+            "days_since_issued": None, "error": str(e),
+        }
+    except (socket.timeout, socket.gaierror, ConnectionRefusedError, OSError) as e:
+        return {
+            "hostname": hostname, "status": "unavailable",
+            "issuer": None, "not_before": None, "not_after": None,
+            "days_since_issued": None, "error": str(e),
+        }
+
+
+def _parse_verified_cert(hostname: str, cert: dict) -> dict:
+    """Extract issuer and issuance date from a successfully verified certificate."""
+    issuer = None
+    for rdn in cert.get("issuer", []):
+        for key, value in rdn:
+            if key == "organizationName":
+                issuer = value
+                break
+
+    not_before = cert.get("notBefore")
+    not_after = cert.get("notAfter")
+    days_since_issued = None
+    if not_before:
+        try:
+            issued_ts = ssl.cert_time_to_seconds(not_before)
+            issued_dt = datetime.fromtimestamp(issued_ts, tz=timezone.utc)
+            days_since_issued = (datetime.now(timezone.utc) - issued_dt).days
+        except (ValueError, OverflowError):
+            pass  # unparseable date format — leave as None rather than guess
+
+    return {
+        "hostname": hostname, "status": "verified",
+        "issuer": issuer, "not_before": not_before, "not_after": not_after,
+        "days_since_issued": days_since_issued, "error": None,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -465,6 +560,28 @@ def analyze_url(url: str, run_intel: bool = True) -> dict:
                     "false_positive_note": "Can also result from billing disputes, ownership transfers, or non-renewal — not always abuse-related.",
                 })
 
+    ssl_result = None
+    if run_intel and hostname:
+        ssl_result = check_ssl_certificate(hostname)
+
+        if ssl_result["status"] == "verification_failed":
+            findings.append({
+                "check": "invalid_ssl_certificate",
+                "finding": f"TLS certificate failed verification: {ssl_result['error']}",
+                "weight": 20,
+                "confidence": "medium",
+                "false_positive_note": "Internal tools, dev/staging environments, and some small legitimate sites use self-signed or unverified certificates too.",
+            })
+
+        if ssl_result["status"] == "verified" and ssl_result["days_since_issued"] is not None and ssl_result["days_since_issued"] <= 3:
+            findings.append({
+                "check": "freshly_issued_certificate",
+                "finding": f"TLS certificate was issued {ssl_result['days_since_issued']} day(s) ago",
+                "weight": 10,
+                "confidence": "low",
+                "false_positive_note": "New legitimate sites and routine 90-day cert renewals also produce fresh certificates; only meaningful alongside a newly-registered domain, not alone.",
+            })
+
     score = sum(f["weight"] for f in findings)
     if score >= 70:
         risk_level = "HIGH"
@@ -481,5 +598,6 @@ def analyze_url(url: str, run_intel: bool = True) -> dict:
         "risk_level": risk_level,
         "findings": findings,
         "domain_registration": domain_registration,
+        "ssl_certificate": ssl_result,
     }
     

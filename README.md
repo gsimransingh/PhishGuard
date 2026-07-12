@@ -115,7 +115,7 @@ python main.py -u paypa1-verify.com
 python main.py -u http://evil.ru/login -n -o json
 ```
 
-Standalone URL analysis (`-u`) checks structure (IP-as-hostname, `@` tricks, suspicious TLDs), punycode/homograph patterns, and typosquatting/combosquatting against a configurable brand list in `phishguard/data/known_brands.json`. With intel enabled (the default, skip with `-n`), it also does a live RDAP domain-age lookup. Every finding it returns comes with its own weight, confidence level, and a note on when that specific check can false-positive — check the report output (or `phishguard/url_analyzer.py`'s docstrings) rather than trusting the score blindly.
+Standalone URL analysis (`-u`) checks structure (IP-as-hostname, `@` tricks, suspicious TLDs), punycode/homograph patterns, and typosquatting/combosquatting against a configurable brand list in `phishguard/data/known_brands.json`. With intel enabled (the default, skip with `-n`), it also does a live RDAP domain-registration lookup and a live TLS certificate check against the host. Every finding it returns comes with its own weight, confidence level, and a note on when that specific check can false-positive — check the report output (or `phishguard/url_analyzer.py`'s docstrings) rather than trusting the score blindly. Note that a valid TLS certificate is not treated as a sign of legitimacy; it only proves the connection is encrypted, not that the site is trustworthy.
 
 ### CLI Options
 
@@ -258,7 +258,7 @@ PhishGuard's long-term vision is a full anti-phishing ecosystem, not just an ema
 - [x] Typosquatting detection (edit distance against `known_brands.json`)
 - [x] Combosquatting detection (brand substring in non-brand domain)
 - [x] Domain age lookup via RDAP, gated behind `-n`/`--no-intel`
-- [ ] SSL/TLS certificate inspection
+- [x] SSL/TLS certificate inspection (verification failures + freshly-issued cert detection; a valid cert is explicitly NOT treated as a clean bill of health, see `url_analyzer.py` docstring)
 - [ ] Public-suffix-aware domain parsing (current registrable-domain extraction is a naive last-two-labels split — see `url_analyzer.py` module docstring for the known false positive/negative it causes on ccTLDs like `.co.uk`)
 - [ ] Wire URL findings into the email analyzer's scoring (currently `analyzer.py` only does a crude keyword match on URLs found in emails; the new structural/typosquat checks aren't used there yet)
 
@@ -291,4 +291,4 @@ This tool is intended for **educational and defensive security purposes only**. 
 
 ---
 
-*Built as part of a SOC analyst portfolio project by me, Gursimran Singh.*
+*Built as part of a SOC analyst portfolio project by Gursimran Singh.*

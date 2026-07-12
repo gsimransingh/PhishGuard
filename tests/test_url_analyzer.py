@@ -20,7 +20,9 @@ RDAP/network calls are mocked locally in the tests that need them; nothing
 in this file makes a real HTTP request.
 """
 
-from unittest.mock import Mock, patch
+import socket
+import ssl
+from unittest.mock import MagicMock, Mock, patch
 
 from phishguard.url_analyzer import (
     _levenshtein,
@@ -28,6 +30,7 @@ from phishguard.url_analyzer import (
     analyze_url,
     check_domain_registration,
     check_punycode_homograph,
+    check_ssl_certificate,
     check_typosquatting,
     check_url_structure,
 )
@@ -261,6 +264,72 @@ class TestCheckDomainRegistration:
 
 
 # ---------------------------------------------------------------------------
+# check_ssl_certificate() — TLS handshake fully mocked, no real network
+# ---------------------------------------------------------------------------
+
+def _mock_context_manager(return_value):
+    """Build a MagicMock that behaves as a context manager yielding return_value,
+    matching how socket.create_connection() and ssl wrap_socket() are used
+    ('with X() as y:') in check_ssl_certificate."""
+    cm = MagicMock()
+    cm.__enter__ = Mock(return_value=return_value)
+    cm.__exit__ = Mock(return_value=False)
+    return cm
+
+
+class TestCheckSslCertificate:
+    @patch("phishguard.url_analyzer.ssl.create_default_context")
+    @patch("phishguard.url_analyzer.socket.create_connection")
+    def test_verified_certificate_is_parsed(self, mock_connect, mock_ctx):
+        mock_sock = MagicMock()
+        mock_connect.return_value = _mock_context_manager(mock_sock)
+
+        mock_ssock = MagicMock()
+        mock_ssock.getpeercert.return_value = {
+            "issuer": ((("organizationName", "Let's Encrypt"),),),
+            "notBefore": "Jun  1 00:00:00 2020 GMT",
+            "notAfter": "Aug 30 00:00:00 2030 GMT",
+        }
+        mock_context = MagicMock()
+        mock_context.wrap_socket.return_value = _mock_context_manager(mock_ssock)
+        mock_ctx.return_value = mock_context
+
+        result = check_ssl_certificate("example.com")
+        assert result["status"] == "verified"
+        assert result["issuer"] == "Let's Encrypt"
+        assert result["days_since_issued"] is not None
+        assert result["days_since_issued"] > 1000  # issued in 2020, definitely not "fresh"
+
+    @patch("phishguard.url_analyzer.ssl.create_default_context")
+    @patch("phishguard.url_analyzer.socket.create_connection")
+    def test_verification_failure_is_caught_not_raised(self, mock_connect, mock_ctx):
+        mock_connect.return_value = _mock_context_manager(MagicMock())
+
+        mock_context = MagicMock()
+        mock_context.wrap_socket.side_effect = ssl.SSLCertVerificationError("self-signed certificate")
+        mock_ctx.return_value = mock_context
+
+        result = check_ssl_certificate("self-signed.example.com")
+        assert result["status"] == "verification_failed"
+        assert "self-signed" in result["error"]
+
+    @patch("phishguard.url_analyzer.socket.create_connection")
+    def test_connection_failure_is_caught_not_raised(self, mock_connect):
+        mock_connect.side_effect = socket.timeout("timed out")
+
+        result = check_ssl_certificate("unreachable.example.com")
+        assert result["status"] == "unavailable"
+        assert result["issuer"] is None
+
+    @patch("phishguard.url_analyzer.socket.create_connection")
+    def test_dns_failure_is_caught_not_raised(self, mock_connect):
+        mock_connect.side_effect = socket.gaierror("Name or service not known")
+
+        result = check_ssl_certificate("does-not-resolve.example.com")
+        assert result["status"] == "unavailable"
+
+
+# ---------------------------------------------------------------------------
 # analyze_url() — full orchestration
 # ---------------------------------------------------------------------------
 
@@ -268,6 +337,10 @@ class TestAnalyzeUrl:
     def test_offline_mode_skips_domain_registration(self):
         result = analyze_url("paypa1.com", run_intel=False)
         assert result["domain_registration"] is None
+
+    def test_offline_mode_skips_ssl_certificate(self):
+        result = analyze_url("paypa1.com", run_intel=False)
+        assert result["ssl_certificate"] is None
 
     def test_bare_domain_without_scheme_is_handled(self):
         result = analyze_url("paypa1.com", run_intel=False)
@@ -308,3 +381,4 @@ class TestAnalyzeUrl:
         checks = [f["check"] for f in result["findings"]]
         assert "young_domain" in checks
         assert "short_registration_period" in checks
+        
