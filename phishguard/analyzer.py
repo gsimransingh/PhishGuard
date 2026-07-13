@@ -117,7 +117,13 @@ def analyze(parsed: dict, file_path: str, run_intel: bool = True) -> dict:
                     score += 40
 
     # --- Risk level ---
-    if score >= 70:
+    # CRITICAL (150+) means both the email's own auth/structure checks
+    # failed AND an external signal (threat intel or a risky attachment)
+    # corroborated it — not just a higher header-failure score. See the
+    # module-level scoring table in README.md for the reasoning.
+    if score >= 150:
+        risk_level = "CRITICAL"
+    elif score >= 70:
         risk_level = "HIGH"
     elif score >= 35:
         risk_level = "MEDIUM"

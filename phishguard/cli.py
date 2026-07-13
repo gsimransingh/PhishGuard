@@ -135,6 +135,7 @@ def print_url_report(report: dict, out=sys.stdout) -> str: # type: ignore
 
 
 
+def print_batch_summary(results: list[dict], out=sys.stdout) -> str: # type: ignore
     """Print a summary table of batch analysis results."""
     sep = "=" * 70
     lines = []
@@ -153,11 +154,12 @@ def print_url_report(report: dict, out=sys.stdout) -> str: # type: ignore
             lines.append(f"  {fname:<35} {r['risk_level']:<8} {str(r['risk_score']):<8} {len(r['flags'])} flag(s)") # type: ignore
     lines.append(sep) # type: ignore
 
+    critical = sum(1 for r in results if r.get("risk_level") == "CRITICAL") # type: ignore
     high   = sum(1 for r in results if r.get("risk_level") == "HIGH") # type: ignore
     medium = sum(1 for r in results if r.get("risk_level") == "MEDIUM") # type: ignore
     low    = sum(1 for r in results if r.get("risk_level") == "LOW") # type: ignore
     errors = sum(1 for r in results if r.get("error")) # type: ignore
-    lines.append(f"  HIGH: {high}  |  MEDIUM: {medium}  |  LOW: {low}  |  ERRORS: {errors}") # type: ignore
+    lines.append(f"  CRITICAL: {critical}  |  HIGH: {high}  |  MEDIUM: {medium}  |  LOW: {low}  |  ERRORS: {errors}") # type: ignore
     lines.append(sep) # type: ignore
 
     output = "\n".join(lines) # type: ignore

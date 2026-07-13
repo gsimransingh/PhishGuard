@@ -166,11 +166,14 @@ PhishGuard calculates a risk score based on weighted flags:
 | High-abuse IP (AbuseIPDB >= 50) | +35 |
 | Malicious URL (VirusTotal) | +40 |
 
-| Score | Risk Level |
-| ------- | ------------ |
-| 0–34 | LOW |
-| 35–69 | MEDIUM |
-| 70+ | HIGH |
+| Score | Risk Level | Color |
+| ------- | ------------ | ------- |
+| 0–34 | LOW | Green |
+| 35–69 | MEDIUM | Dark goldenrod |
+| 70–149 | HIGH | Deep orange |
+| 150+ | CRITICAL | Red |
+
+CRITICAL is deliberately hard to reach with header/structure failures alone — a typical clearly-phishing email (failed SPF/DKIM/DMARC, Reply-To mismatch, suspicious URLs) lands around 115–125, still HIGH. Crossing into CRITICAL requires stacking that baseline with something more concrete: a risky attachment, or (with threat intel enabled) a confirmed-malicious URL or high-abuse-confidence IP. The same 150 threshold and color scheme apply to standalone URL analysis (`-u`) for consistency across the tool.
 
 ---
 

@@ -17,10 +17,25 @@ conftest.py — analyzer.py's DNS validation runs unconditionally regardless
 of run_intel, so this suite always passes run_intel=False to additionally
 skip the rate-limited AbuseIPDB/VirusTotal calls, and relies on the fixture
 to keep DNS off the network too.
+
+Exception: TestCliEndToEnd runs the CLI as a real subprocess to catch
+wiring bugs unit tests can't see (see that class's docstring). A subprocess
+is a separate Python process, so conftest.py's monkeypatch-based DNS stub
+cannot reach it — those specific tests DO make real DNS lookups. This is a
+deliberate, narrow exception to the rest of the suite's network isolation,
+not an oversight, and is bounded by a 30s timeout per test so a network
+hiccup fails loudly instead of hanging CI.
 """
+
+import shutil
+import subprocess
+import sys
+from pathlib import Path
 
 from phishguard.analyzer import _extract_domain, _extract_email_address, analyze
 from phishguard.email_parser import parse_eml
+
+PROJECT_ROOT = Path(__file__).parent.parent
 
 
 def _minimal_parsed(**overrides) -> dict:
@@ -53,6 +68,44 @@ def _minimal_parsed(**overrides) -> dict:
 # ---------------------------------------------------------------------------
 # analyze() against real sample emails
 # ---------------------------------------------------------------------------
+
+class TestCriticalRiskTier:
+    """
+    CRITICAL (150+) is deliberately hard to reach with header/structure
+    failures alone — it's meant to require stacking a header-failure
+    baseline with something more concrete, like a risky attachment or
+    (with intel on) a confirmed-malicious IP/URL. See the reasoning in
+    analyzer.py's risk-level comment.
+    """
+
+    def test_headers_alone_do_not_reach_critical(self, phishing_test_eml):
+        # phishing_test.eml scores 115 from headers/URLs alone — high, but
+        # not critical. Confirms the threshold isn't trivially reached.
+        parsed = parse_eml(phishing_test_eml)
+        report = analyze(parsed, phishing_test_eml, run_intel=False)
+        assert report["risk_level"] == "HIGH"
+        assert report["risk_score"] < 150
+
+    def test_header_failures_plus_risky_attachment_reaches_critical(self):
+        # Stack a full header-failure baseline with a risky attachment
+        # (no threat intel needed) to cross the 150 threshold.
+        parsed = _minimal_parsed(
+            **{
+                "from": "PayPal <billing@paypal.com>",
+                "reply_to": "collect-funds@evil-domain.ru",
+                "spf": "fail", "dkim": "", "dmarc": "fail",
+                "urls": [
+                    "http://evil.ru/account/verify-login",
+                    "http://evil.ru/secure/update-password",
+                    "http://evil.ru/confirm/account-details",
+                ],
+                "attachments": [{"filename": "invoice.exe", "content_type": "application/octet-stream", "size_bytes": 1024}],
+            }
+        )
+        report = analyze(parsed, "test.eml", run_intel=False)
+        assert report["risk_score"] >= 150
+        assert report["risk_level"] == "CRITICAL"
+
 
 class TestAnalyzeSampleEmails:
     def test_legitimate_email_scores_low(self, legitimate_eml):
@@ -195,3 +248,58 @@ class TestDnsNotFoundScoring:
         parsed = _minimal_parsed()
         report = analyze(parsed, "test.eml", run_intel=False)
         assert any("No SPF DNS record found" in f for f in report["flags"])
+
+
+class TestCliEndToEnd:
+    """
+    Runs the actual CLI as a subprocess, the way a user would, rather than
+    calling functions directly. This exists specifically because a real bug
+    slipped past every other test in this suite: print_batch_summary()'s
+    function signature line was accidentally deleted during an edit, but
+    every unit test that exercised it called print_batch_summary() directly
+    as an imported function, so the NameError inside run_batch()'s own
+    reference to it never got exercised. Only running `python main.py -F ...`
+    for real surfaced it. These tests close that gap by invoking the CLI
+    exactly as the user does.
+    """
+
+    def test_single_file_analysis_runs_without_crashing(self, phishing_test_eml):
+        result = subprocess.run(
+            [sys.executable, "main.py", "-f", phishing_test_eml, "-n"],
+            cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "Risk Level" in result.stdout
+
+    def test_batch_analysis_runs_without_crashing(self, tmp_path, phishing_test_eml, legitimate_eml):
+        # Copy two real sample files into a scratch folder so -F has
+        # something to batch over, without touching the real samples/ dir.
+        shutil.copy(phishing_test_eml, tmp_path / "phishing.eml")
+        shutil.copy(legitimate_eml, tmp_path / "legit.eml")
+
+        result = subprocess.run(
+            [sys.executable, "main.py", "-F", str(tmp_path), "-n"],
+            cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "Batch Analysis Summary" in result.stdout
+        assert "CRITICAL:" in result.stdout  # would have caught the missing-def bug directly
+
+    def test_url_analysis_runs_without_crashing(self):
+        result = subprocess.run(
+            [sys.executable, "main.py", "-u", "paypa1.com", "-n"],
+            cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "URL Analysis Report" in result.stdout
+
+    def test_csv_export_runs_without_crashing(self, tmp_path, phishing_test_eml):
+        shutil.copy(phishing_test_eml, tmp_path / "phishing.eml")
+        csv_path = tmp_path / "out.csv"
+
+        result = subprocess.run(
+            [sys.executable, "main.py", "-F", str(tmp_path), "-n", "--csv", str(csv_path)],
+            cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
+        assert csv_path.exists()

@@ -583,7 +583,12 @@ def analyze_url(url: str, run_intel: bool = True) -> dict:
             })
 
     score = sum(f["weight"] for f in findings)
-    if score >= 70:
+    # Same 150 threshold and reasoning as analyzer.py — kept consistent
+    # across both engines so "CRITICAL" means the same thing everywhere
+    # in the tool, rather than each module inventing its own scale.
+    if score >= 150:
+        risk_level = "CRITICAL"
+    elif score >= 70:
         risk_level = "HIGH"
     elif score >= 35:
         risk_level = "MEDIUM"

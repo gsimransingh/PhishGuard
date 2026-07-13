@@ -12,7 +12,7 @@ def generate_html_report(report: dict, output_path: str = None) -> str:
     Generate a styled HTML report from the analysis dict.
     If output_path is provided, writes to file. Otherwise returns HTML string.
     """
-    risk_colors = {"HIGH": "#d32f2f", "MEDIUM": "#f57c00", "LOW": "#388e3c"}
+    risk_colors = {"CRITICAL": "#b71c1c", "HIGH": "#e65100", "MEDIUM": "#b8860b", "LOW": "#388e3c"}
     risk_color = risk_colors.get(report["risk_level"], "#757575")
 
     html = f"""<!DOCTYPE html>
@@ -190,7 +190,7 @@ def generate_cef_log(report: dict) -> str:
 
     Severity mapping: LOW=3, MEDIUM=6, HIGH=9
     """
-    severity_map = {"LOW": 3, "MEDIUM": 6, "HIGH": 9}
+    severity_map = {"CRITICAL": 10, "HIGH": 9, "MEDIUM": 6, "LOW": 3}
     severity = severity_map.get(report["risk_level"], 5)
 
     def escape_cef(s):

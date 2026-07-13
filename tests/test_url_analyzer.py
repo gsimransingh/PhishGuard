@@ -381,4 +381,35 @@ class TestAnalyzeUrl:
         checks = [f["check"] for f in result["findings"]]
         assert "young_domain" in checks
         assert "short_registration_period" in checks
-        
+
+    @patch("phishguard.url_analyzer.socket.create_connection")
+    @patch("phishguard.url_analyzer.requests.get")
+    def test_stacked_findings_reach_critical_tier(self, mock_rdap, mock_connect):
+        # CRITICAL (150+) requires stacking multiple independent signals —
+        # structure red flags, a brand combosquat, AND a corroborating RDAP
+        # signal, not just one bad check. Mocks both network calls (RDAP +
+        # the SSL handshake) so this stays fast and deterministic; the SSL
+        # check is mocked to simply fail to connect (contributes 0 score),
+        # keeping the test focused on the RDAP-driven signals.
+        from datetime import datetime, timedelta, timezone
+        mock_connect.side_effect = socket.timeout("simulated: no ssl check needed for this test")
+
+        created = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
+        expires = (datetime.now(timezone.utc) + timedelta(days=355)).isoformat()
+        mock_rdap.return_value = Mock(
+            status_code=200,
+            json=lambda: {
+                "events": [
+                    {"eventAction": "registration", "eventDate": created},
+                    {"eventAction": "expiration", "eventDate": expires},
+                ],
+                "entities": [],
+                "status": ["clientHold"],
+            },
+        )
+
+        url = "http://user@a.b.c.paypal-verify.tk:8080/login"
+        result = analyze_url(url, run_intel=True)
+
+        assert result["risk_score"] >= 150
+        assert result["risk_level"] == "CRITICAL"
