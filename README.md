@@ -38,7 +38,8 @@ PhishGuard/
 │   ├── threat_intel.py          # AbuseIPDB & VirusTotal API integrations
 │   ├── report_generator.py      # HTML report & CEF log generation
 │   └── data/
-│       └── known_brands.json    # Configurable brand list for typosquat detection
+│       ├── known_brands.json    # Configurable brand list for typosquat detection
+│       └── taglines.txt         # 69 rotating startup banner taglines
 ├── samples/
 │   ├── phishing_test.eml        # Sample phishing email (PayPal spoof)
 │   ├── phishing_amazon.eml      # Sample phishing email (Amazon spoof)
@@ -129,6 +130,7 @@ Standalone URL analysis (`-u`) checks structure (IP-as-hostname, `@` tricks, sus
 | `-n`, `--no-intel` | Skip AbuseIPDB / VirusTotal lookups (offline mode) |
 | `-V`, `--verbose` | Batch mode only — print the full report per file instead of a one-line summary |
 | `--csv` | Batch mode only — export results to a CSV file |
+| `--no-banner` | Suppress the startup banner (useful for cron/CI/scripted runs) |
 | `--version` | Show version and exit |
 
 Batch mode (`-F`) is meant for triaging a folder of reported emails at once.
@@ -250,7 +252,8 @@ PhishGuard's long-term vision is a full anti-phishing ecosystem, not just an ema
 - [x] Batch analysis of a folder of `.eml` files (`-F`), with CSV export and verbose mode
 - [x] Clean package architecture (`analyzer.py` as core engine, decoupled from CLI)
 - [x] Full type hints across all modules
-- [x] Automated test suite (pytest) — 76 tests across email_parser, url_analyzer, and analyzer, all network calls mocked
+- [x] Automated test suite (pytest) — 91 tests across email_parser, url_analyzer, analyzer, and real CLI end-to-end smoke tests, all network calls mocked except the deliberate CLI subprocess tests
+- [x] Rotating ASCII startup banner (figlet "slant" font) with a randomly selected tagline from 69 options, stderr-only and gated off entirely for json/html/cef output plus a `--no-banner` flag
 
 ### Phase 1 — URL & domain analysis (in progress)
 

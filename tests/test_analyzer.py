@@ -27,6 +27,7 @@ not an oversight, and is bounded by a 30s timeout per test so a network
 hiccup fails loudly instead of hanging CI.
 """
 
+import json
 import shutil
 import subprocess
 import sys
@@ -303,3 +304,32 @@ class TestCliEndToEnd:
         )
         assert result.returncode == 0, result.stderr
         assert csv_path.exists()
+
+    def test_banner_appears_on_stderr_in_text_mode(self, phishing_test_eml):
+        result = subprocess.run(
+            [sys.executable, "main.py", "-f", phishing_test_eml, "-n"],
+            cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=30,
+        )
+        assert "v0.2.0" in result.stderr
+
+    def test_no_banner_flag_suppresses_it(self, phishing_test_eml):
+        result = subprocess.run(
+            [sys.executable, "main.py", "-f", phishing_test_eml, "-n", "--no-banner"],
+            cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=30,
+        )
+        assert "v0.2.0" not in result.stderr
+
+    def test_json_output_stdout_is_never_polluted_by_banner(self, phishing_test_eml):
+        # The one rule that actually matters for the banner feature: it must
+        # never touch stdout, or it breaks `... -o json | jq .` for anyone
+        # scripting against this tool. The banner still goes to stderr even
+        # in json mode's underlying print_banner() function, but main()
+        # must gate the call so it's never invoked at all for json/html/cef.
+        result = subprocess.run(
+            [sys.executable, "main.py", "-f", phishing_test_eml, "-n", "-o", "json"],
+            cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
+        json.loads(result.stdout)  # raises if stdout isn't pure, parseable JSON
+        assert "v0.2.0" not in result.stdout
+        assert "v0.2.0" not in result.stderr  # banner skipped entirely for json mode

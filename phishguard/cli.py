@@ -10,12 +10,59 @@ import json
 import sys
 import os
 import csv
+import random
 from datetime import datetime, timezone
 
 from phishguard.email_parser import parse_eml # type: ignore
 from phishguard.analyzer import analyze # type: ignore
 from phishguard.url_analyzer import analyze_url # type: ignore
 from phishguard.report_generator import generate_html_report, generate_cef_log # type: ignore
+
+_VERSION = "0.2.0"
+
+_DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+_TAGLINES_PATH = os.path.join(_DATA_DIR, "taglines.txt")
+
+# figlet "slant" font, generated offline and hardcoded — no pyfiglet
+# dependency needed at runtime for one static string. Plain ASCII only
+# (no Unicode box-drawing), so it renders correctly in plain cmd.exe and
+# older locale settings, not just Windows Terminal/VS Code.
+_ASCII_BANNER = r"""
+    ____  __    _      __    ______                     __
+   / __ \/ /_  (_)____/ /_  / ____/_  ______ __________/ /
+  / /_/ / __ \/ / ___/ __ \/ / __/ / / / __ `/ ___/ __  / 
+ / ____/ / / / (__  ) / / / /_/ / /_/ / /_/ / /  / /_/ /  
+/_/   /_/ /_/_/____/_/ /_/\____/\__,_/\__,_/_/   \__,_/   
+"""
+
+
+def _load_tagline() -> str:
+    """Pick a random tagline from data/taglines.txt. Falls back to a fixed
+    line if the file is missing or empty, so a banner never crashes a run."""
+    try:
+        with open(_TAGLINES_PATH, "r", encoding="utf-8") as f:
+            lines = [line.strip() for line in f if line.strip()]
+        if lines:
+            return random.choice(lines)
+    except FileNotFoundError:
+        pass
+    return "Phishing Email & URL Analysis for SOC Analysts"
+
+
+def print_banner(): # type: ignore
+    """
+    Print the ASCII banner + version + a random tagline to STDERR — never
+    stdout. This is the one rule that actually matters here: printing to
+    stdout would corrupt piped JSON/CSV output for anyone scripting against
+    this tool (e.g. `python main.py -f x.eml -o json | jq .`). Callers are
+    also responsible for only calling this in text-output mode and skipping
+    it entirely under --no-banner; this function itself doesn't check either
+    condition, it just prints when called.
+    """
+    print(_ASCII_BANNER, file=sys.stderr) # type: ignore
+    print(f"  Phishing Email & URL Analysis for SOC Analysts | v{_VERSION}", file=sys.stderr) # type: ignore
+    print(f"  {_load_tagline()}", file=sys.stderr) # type: ignore
+    print("", file=sys.stderr) # type: ignore
 
 
 # ---------------------------------------------------------------------------
@@ -369,9 +416,16 @@ Examples:
         help="(Batch mode) Export results to a CSV file"
     )
 
+    parser.add_argument("--no-banner", action="store_true",
+                        help="Suppress the startup banner (useful for cron/CI/scripted runs)")
     parser.add_argument("--version", action="version", version="PhishGuard 0.2.0")
 
     args = parser.parse_args()
+
+    # Banner only in human-readable text mode, and only to stderr — never
+    # for json/html/cef, where it would corrupt piped/redirected output.
+    if not args.no_banner and args.output == "text":
+        print_banner()
 
     if args.url:
         run_url(args)

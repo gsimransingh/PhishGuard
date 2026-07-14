@@ -1,0 +1,69 @@
+Because "Dear Customer" isn't a greeting, it's a red flag.
+SPF fail, DKIM missing, DMARC fail — that's not an email, that's a confession.
+Nigerian princes not affiliated with this project. Probably.
+"URGENT: verify your account" — no. You verify first.
+Every typosquat domain was once someone's clever idea.
+Reply-To mismatches don't lie. People do.
+If it says "act now," act suspicious.
+Real banks don't need you to click a link to "confirm your identity."
+A padlock icon means encrypted, not trustworthy. This tool remembers that.
+That .zip domain is not your friend.
+Phishers count on you not reading the sender address. We do.
+"You've won!" You haven't.
+This isn't paranoia, it's SPF, DKIM, and DMARC.
+Freshly registered domain plus urgent tone equals a classic combo.
+Trust, but verify. Mostly just verify.
+Punycode: because "paypal" and a lookalike are not the same word.
+If the domain is three days old and the urgency is maximum, connect the dots.
+Nobody's account gets "permanently suspended" over email. Nobody.
+A CEO asking for gift cards by email is not a CEO.
+Combosquatting: when a fake domain thinks it's fooling someone.
+The attachment is not an invoice. It rarely is.
+A self-signed certificate doesn't scream "trust me," it whispers "maybe don't."
+Ctrl+F "urgent" is a legitimate threat-hunting technique.
+Every phishing email is a confidence trick wearing a logo.
+VirusTotal has seen this URL before. Now so have we.
+"Click here to avoid account closure" is the internet's oldest lie.
+A .exe file has never once been a legitimate invoice.
+High-abuse IP, low analyst patience.
+If Reply-To isn't From, something's already wrong.
+Homograph attacks prove one swapped character can carry a whole scam.
+AbuseIPDB doesn't forget. Neither should you.
+This email was sent from a notification-only address. So was the last scam.
+Every "confirm your password" link should confirm your suspicion instead.
+DMARC policy: reject. Also a good life motto for suspicious emails.
+Not every .ru domain is malicious. This one probably is.
+Batch mode exists because one phishing email is never just one phishing email.
+Risk score 165 isn't a typo, it's a warning.
+A domain registered yesterday has no business asking for your bank details today.
+The sender says PayPal. The domain says otherwise.
+Urgency is not evidence. It's a tactic.
+A shortened URL is a URL wearing a mask.
+Multi-year domain registration is rare in phishing, common in trust.
+If it looks like DocuSign but smells like phishing, it's phishing.
+The best phishing emails are boring. The worst ones scream URGENT.
+Every IOC tells a story. Usually a short, bad one.
+A verified TLS certificate does not mean verified intentions.
+"Your package couldn't be delivered" — neither could your trust, apparently.
+SOC analysts don't get surprised. They get confirmed.
+A typosquat is a lie with really good SEO.
+If the invoice needs macros enabled, decline the invoice.
+CRITICAL isn't a mood, it's a threshold.
+That "IT department" email did not come from IT.
+Threat intel doesn't care about your feelings, only your IOCs.
+Some links lead to Amazon. Others lead to regret.
+A .top TLD isn't automatically evil. It's just deeply suspicious.
+Phishing kits get updated more often than some banks' security pages.
+The "@" trick has been hiding real destinations since forever.
+If the domain has four subdomains, it's compensating for something.
+Suspicious keywords: login, verify, secure, confirm, account. Ring a bell?
+This tool doesn't get social-engineered. It just reads headers.
+A reused phishing template is still a phishing template.
+Every scam starts with "Dear Valued Customer" and ends with your money.
+Two-factor authentication is annoying for you and worse for them.
+When in doubt, don't click. When certain, still don't click.
+Green means proceed. Red means not today.
+Cybercriminals recycle domains. We recycle suspicion.
+Not all heroes wear capes. Some just check SPF records.
+The safest click is the one you never made.
+Phishing never sleeps. Neither does this scan.
