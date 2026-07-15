@@ -1,300 +1,199 @@
+Copy this into `README.md`:
+
+```markdown
 # PhishGuard
 
-> A Python-based phishing email analyzer built for SOC analysts. Designed to automate Tier 1 email triage — extracting IOCs, validating authentication headers, enriching with live threat intel, and generating structured alert reports.
+> A Python CLI for helping SOC analysts triage suspicious email files. It extracts evidence, applies explainable risk signals, optionally enriches IOCs, and produces reports for analyst review.
 
-![Python](https://img.shields.io/badge/Python-3.8+-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![SOC](https://img.shields.io/badge/role-SOC%20Analyst-red) ![Version](https://img.shields.io/badge/version-0.2.0-orange)
+![Python](https://img.shields.io/badge/Python-3.9%2B-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Version](https://img.shields.io/badge/version-0.2.0-orange)
 
----
+## Purpose
 
-## What It Does
+PhishGuard reduces repetitive Tier 1 email-triage work. It is not an automated blocking engine and must not replace analyst judgment.
 
-Given a `.eml` file, PhishGuard will:
+It should help an analyst answer:
 
-1. **Parse** all email headers — From, Reply-To, Received chain, Message-ID, X-Originating-IP
-2. **Validate** SPF, DKIM, and DMARC authentication results from headers
-3. **DNS Check** — live SPF and DMARC record lookups via `dnspython` to verify what the domain actually publishes
-4. **Extract IOCs** — URLs, IPv4 addresses, and attachment metadata from the email body
-5. **Threat Intel** — check extracted IPs against AbuseIPDB and URLs against VirusTotal
-6. **Score risk** using a weighted flag system (SPF fail, DKIM missing, Reply-To mismatch, suspicious URLs, risky attachments, high-abuse IPs, malicious URLs)
-7. **Output** a structured report in text, JSON, HTML, or CEF format
+- What email, URL, IP, attachment, and authentication signals were found?
+- Why does each signal matter?
+- What evidence supports the assigned risk level?
+- What should be investigated next?
 
----
+## Current capabilities
 
-## Project Structure
+Given an `.eml` file, PhishGuard can:
 
-```text
-PhishGuard/
-├── main.py                      # Entry point (thin wrapper)
-├── requirements.txt             # Dependencies
-├── requirements-dev.txt         # Dev dependencies (pytest)
-├── pytest.ini                   # Test discovery & sys.path config
-├── phishguard/
-│   ├── __init__.py              # Package metadata
-│   ├── analyzer.py              # Core analysis engine & risk scoring
-│   ├── cli.py                   # CLI argument parsing & output formatting
-│   ├── email_parser.py          # .eml parsing & IOC extraction
-│   ├── url_analyzer.py          # Standalone URL/domain analysis (Phase 1)
-│   ├── dns_validator.py         # Live SPF & DMARC DNS lookups
-│   ├── threat_intel.py          # AbuseIPDB & VirusTotal API integrations
-│   ├── report_generator.py      # HTML report & CEF log generation
-│   └── data/
-│       ├── known_brands.json    # Configurable brand list for typosquat detection
-│       └── taglines.txt         # 69 rotating startup banner taglines
-├── samples/
-│   ├── phishing_test.eml        # Sample phishing email (PayPal spoof)
-│   ├── phishing_amazon.eml      # Sample phishing email (Amazon spoof)
-│   ├── suspicious_email.eml     # Sample borderline/suspicious email
-│   └── legitimate_email.eml     # Sample clean email (for false-positive testing)
-└── tests/
-    ├── conftest.py              # Shared fixtures & network isolation
-    ├── test_email_parser.py
-    ├── test_url_analyzer.py
-    └── test_analyzer.py
-```
-
----
+- Parse common email headers and the plain-text body
+- Extract URLs, public IPv4 addresses, attachment metadata, and Received headers
+- Read SPF, DKIM, and DMARC-related header results
+- Look up SPF and DMARC DNS records
+- Flag Reply-To mismatches, suspicious URL keywords, and risky attachment extensions
+- Check IPs with AbuseIPDB and URLs with VirusTotal when API keys are available
+- Produce text, JSON, HTML, CEF, batch-summary, and CSV output
+- Analyze a standalone URL or domain for structural tricks, typosquatting, RDAP registration signals, and TLS-certificate signals
 
 ## Installation
+
+**Supported Python:** Python 3.9 or newer.
 
 ```bash
 git clone https://github.com/gsimransingh/PhishGuard.git
 cd PhishGuard
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
-### API Keys (Optional)
-
-Set these as environment variables to enable live threat intel lookups:
+For development and testing:
 
 ```bash
-# Free tier: https://www.abuseipdb.com/api
-export ABUSEIPDB_API_KEY="your_key_here"
-
-# Free tier: https://www.virustotal.com/gui/join-us
-export VIRUSTOTAL_API_KEY="your_key_here"
+python -m pip install -r requirements-dev.txt
+python -m pytest
 ```
 
-**Windows (PowerShell):**
+## Basic usage
+
+```bash
+# Analyze one email
+python main.py -f samples/phishing_test.eml
+
+# JSON for scripting or SIEM ingestion
+python main.py -f samples/phishing_test.eml -o json
+
+# HTML report
+python main.py -f samples/phishing_test.eml -o html -O report.html
+
+# CEF event
+python main.py -f samples/phishing_test.eml -o cef
+
+# Batch triage
+python main.py -F samples/ -V
+
+# Batch summary as CSV
+python main.py -F samples/ --csv results.csv
+
+# Analyze one URL or domain
+python main.py -u paypa1-verify.com
+
+# URL analysis without RDAP or TLS checks
+python main.py -u http://evil.ru/login -n -o json
+```
+
+## Network and privacy behavior
+
+PhishGuard can contact external services. Treat suspicious emails and IOCs as potentially sensitive data.
+
+- Email analysis performs DNS SPF and DMARC lookups.
+- With API keys configured, email analysis may send extracted IPs to AbuseIPDB and up to three URLs to VirusTotal.
+- Standalone URL analysis can perform an RDAP lookup and a TLS connection to the target host.
+- `--no-intel` skips AbuseIPDB and VirusTotal for email analysis. At present, email DNS validation still runs.
+- `--no-intel` skips RDAP and TLS checks for standalone URL analysis.
+
+PhishGuard does **not** execute attachments or fetch webpage content. Analysts should still use approved sandboxing and investigation procedures for malicious URLs and files.
+
+### Optional API keys
+
+```bash
+export ABUSEIPDB_API_KEY="your_key_here"
+export VIRUSTOTAL_API_KEY="your_key_here"
+```
 
 ```powershell
 $env:ABUSEIPDB_API_KEY="your_key_here"
 $env:VIRUSTOTAL_API_KEY="your_key_here"
 ```
 
-Without keys, the tool runs fully in offline mode — no crashes, no errors.
+## Risk levels
 
----
+| Score | Level | Meaning |
+| --- | --- | --- |
+| 0–34 | LOW | Few or no suspicious signals |
+| 35–69 | MEDIUM | Suspicious signals that merit review |
+| 70–149 | HIGH | Strong evidence requiring analyst action |
+| 150+ | CRITICAL | Multiple strong signals, including corroborating evidence |
 
-## Usage
+Scores are decision-support signals, not proof that a message is malicious. A valid TLS certificate, a clean reputation result, or the absence of flags must not be treated as proof that content is safe.
 
-```bash
-# Human-readable report (default)
-python main.py -f samples/phishing_test.eml
+## Known limitations
 
-# JSON output (SIEM-ready)
-python main.py -f samples/phishing_test.eml -o json
+- Email parsing currently focuses on plain-text content. HTML-only emails and displayed-link versus destination-link mismatches are not yet analyzed.
+- DKIM signature presence is detected, but PhishGuard does not independently perform full DKIM cryptographic verification.
+- DNS records show what a sender domain publishes; they do not independently prove a message passed authentication during delivery.
+- Standalone URL findings are not yet integrated into email URL scoring.
+- Registrable-domain extraction is currently a simple last-two-label approach and can be inaccurate for domains such as `example.co.uk`.
+- Threat-intelligence coverage depends on API availability, rate limits, and configured keys.
+- Reports should be reviewed before being shared externally.
 
-# HTML report (save to file)
-python main.py -f samples/phishing_test.eml -o html -O report.html
+## Triage-first roadmap
 
-# CEF log (for SIEM ingestion)
-python main.py -f samples/phishing_test.eml -o cef
+### 0.3 — Reliability, safety, and project baseline
 
-# Offline mode (skip API calls)
-python main.py -f samples/phishing_test.eml -n
+- [ ] Make local development and testing reproducible
+- [ ] Add automated CI for tests and quality checks
+- [ ] Define supported Python versions in one place
+- [ ] Make output handling safe for untrusted email content
+- [ ] Make IOC ordering deterministic
+- [ ] Clarify and standardize offline versus external-enrichment behavior
+- [ ] Update documentation and remove stale references
 
-# Batch analyze a folder of .eml files
-python main.py -F samples/ -V
+### 0.4 — Stronger email evidence
 
-# Batch analyze and export a CSV summary
-python main.py -F samples/ --csv results.csv
+- [ ] Extract URLs from HTML email bodies
+- [ ] Detect display-text and link-destination mismatches
+- [ ] Improve authentication-result interpretation
+- [ ] Expand attachment metadata and risky-file heuristics
+- [ ] Add representative benign, suspicious, and malicious test fixtures
+- [ ] Improve explainability for each finding
 
-# Standalone URL/domain analysis — no .eml file needed
-python main.py -u paypa1-verify.com
+### 0.5 — Unified URL and email analysis
 
-# Offline URL analysis, JSON output
-python main.py -u http://evil.ru/login -n -o json
-```
+- [ ] Use public-suffix-aware domain parsing
+- [ ] Integrate URL structure and brand-impersonation findings into email triage
+- [ ] Create one shared finding and scoring model
+- [ ] Prevent duplicate findings and inflated scores
+- [ ] Define safe limits for network enrichment during batch analysis
 
-Standalone URL analysis (`-u`) checks structure (IP-as-hostname, `@` tricks, suspicious TLDs), punycode/homograph patterns, and typosquatting/combosquatting against a configurable brand list in `phishguard/data/known_brands.json`. With intel enabled (the default, skip with `-n`), it also does a live RDAP domain-registration lookup and a live TLS certificate check against the host. Every finding it returns comes with its own weight, confidence level, and a note on when that specific check can false-positive — check the report output (or `phishguard/url_analyzer.py`'s docstrings) rather than trusting the score blindly. Note that a valid TLS certificate is not treated as a sign of legitimacy; it only proves the connection is encrypted, not that the site is trustworthy.
+### 0.6 — Analyst workflow improvements
 
-### CLI Options
+- [ ] Improve batch prioritization and analyst summaries
+- [ ] Stabilize JSON and CEF schemas for downstream systems
+- [ ] Add clear recommended next steps to reports
+- [ ] Measure false positives and triage-time reduction with real test cases
 
-| Flag | Description |
-| ------ | ------------- |
-| `-f`, `--file` | Path to a single `.eml` file (required unless `-F` or `-u` is used) |
-| `-F`, `--folder` | Path to a folder of `.eml` files for batch analysis |
-| `-u`, `--url` | A single URL or bare domain to analyze (no `.eml` file needed) |
-| `-o`, `--output` | Output format: `text` (default), `json`, `html`, or `cef` |
-| `-O`, `--save-output` | Save report to disk (single file: saves the report; batch: saves a summary) |
-| `-n`, `--no-intel` | Skip AbuseIPDB / VirusTotal lookups (offline mode) |
-| `-V`, `--verbose` | Batch mode only — print the full report per file instead of a one-line summary |
-| `--csv` | Batch mode only — export results to a CSV file |
-| `--no-banner` | Suppress the startup banner (useful for cron/CI/scripted runs) |
-| `--version` | Show version and exit |
+### Deferred
 
-Batch mode (`-F`) is meant for triaging a folder of reported emails at once.
+These are not active implementation commitments until the triage core is reliable and validated:
 
----
+- Browser extension
+- Machine-learning scoring
+- Public REST API
+- Community reporting
+- Enterprise dashboards and monitoring
 
-## Output Formats
-
-| Format | Use Case |
-| -------- | ---------- |
-| `text` | Human-readable terminal output for quick triage |
-| `json` | SIEM integration, scripting, programmatic access |
-| `html` | Shareable visual reports for stakeholders |
-| `cef` | Common Event Format for SIEM ingestion (Splunk, QRadar, etc.) |
-
----
-
-## Risk Scoring
-
-PhishGuard calculates a risk score based on weighted flags:
-
-| Check | Score |
-| ------- | ------- |
-| SPF fail / softfail | +30 |
-| SPF header missing | +15 |
-| DKIM signature missing | +20 |
-| DMARC fail | +25 |
-| DMARC result missing | +10 |
-| No SPF DNS record for domain | +10 |
-| No DMARC DNS record for domain | +10 |
-| Reply-To mismatch | +20 |
-| Suspicious URL keywords | +10 per URL (max 30) |
-| Risky attachment extension | +40 |
-| Reported IP (AbuseIPDB > 0) | +15 |
-| High-abuse IP (AbuseIPDB >= 50) | +35 |
-| Malicious URL (VirusTotal) | +40 |
-
-| Score | Risk Level | Color |
-| ------- | ------------ | ------- |
-| 0–34 | LOW | Green |
-| 35–69 | MEDIUM | Dark goldenrod |
-| 70–149 | HIGH | Deep orange |
-| 150+ | CRITICAL | Red |
-
-CRITICAL is deliberately hard to reach with header/structure failures alone — a typical clearly-phishing email (failed SPF/DKIM/DMARC, Reply-To mismatch, suspicious URLs) lands around 115–125, still HIGH. Crossing into CRITICAL requires stacking that baseline with something more concrete: a risky attachment, or (with threat intel enabled) a confirmed-malicious URL or high-abuse-confidence IP. The same 150 threshold and color scheme apply to standalone URL analysis (`-u`) for consistency across the tool.
-
----
-
-## Sample Output
-
-**Text:**
+## Project structure
 
 ```text
-============================================================
-  PhishGuard v0.2.0 - Analysis Report
-  Risk Level : HIGH (score: 115)
-============================================================
-  Flags:
-    [!] SPF check failed
-    [!] DKIM signature missing
-    [!] DMARC check failed
-    [!] Reply-To mismatch: sender=billing@paypal.com, reply_to=collect-funds@evil-domain.ru
-    [!] Suspicious URLs found: ['http://paypal-account-verify.login.evil-domain.ru/secure/update']
-============================================================
+PhishGuard/
+├── main.py
+├── requirements.txt
+├── requirements-dev.txt
+├── pytest.ini
+├── phishguard/
+│   ├── analyzer.py
+│   ├── cli.py
+│   ├── dns_validator.py
+│   ├── email_parser.py
+│   ├── report_generator.py
+│   ├── threat_intel.py
+│   ├── url_analyzer.py
+│   └── data/
+├── samples/
+└── tests/
 ```
-
-**JSON:**
-
-```json
-{
-  "tool": "PhishGuard",
-  "version": "0.2.0",
-  "risk_level": "HIGH",
-  "risk_score": 115,
-  "flags": [
-    "SPF check failed",
-    "DKIM signature missing",
-    "DMARC check failed",
-    "Reply-To mismatch: sender=billing@paypal.com, reply_to=collect-funds@evil-domain.ru",
-    "Suspicious URLs found: ['http://paypal-account-verify.login.evil-domain.ru/secure/update']"
-  ],
-  "iocs": {
-    "urls": ["http://paypal-account-verify.login.evil-domain.ru/secure/update"],
-    "ips": ["185.220.101.47"],
-    "attachments": []
-  },
-  "threat_intel": {
-    "ip_checks": [{"ip": "185.220.101.47", "abuse_confidence_score": 98, "total_reports": 847, "is_tor": true}],
-    "url_checks": [{"url": "http://paypal-account-verify.login.evil-domain.ru/secure/update", "malicious": 12, "suspicious": 3}]
-  }
-}
-```
-
----
-
-## Tech Stack
-
-- **Python 3.8+** — `email`, `re`, `argparse`, `json`, `datetime`
-- **requests** — AbuseIPDB & VirusTotal API calls
-- **dnspython** — live SPF/DMARC DNS lookups
-- **ipwhois** — IP geolocation/ASN (future use)
-
----
-
-## Roadmap
-
-PhishGuard's long-term vision is a full anti-phishing ecosystem, not just an email tool. The original phase plan put URL/domain analysis first (Phase 1) and email analysis later (Phase 3). In practice, development started with email analysis since phishing most commonly arrives that way, and the auth-header, IOC extraction, and risk-scoring logic built for it are reusable for URL/domain analysis too. The phases below reflect actual status, not build order.
-
-### Foundation (built first, functionality originally scoped as Phase 3)
-
-- [x] `.eml` parsing — headers, body, URLs, IPs, attachments
-- [x] SPF / DKIM / DMARC header validation
-- [x] Live DNS SPF/DMARC record validation
-- [x] Risk scoring engine with weighted, explainable flags
-- [x] AbuseIPDB integration for IP reputation checks
-- [x] VirusTotal integration for URL/domain checks
-- [x] Offline mode (`-n` / `--no-intel`)
-- [x] Text, JSON, HTML, and CEF report output
-- [x] Batch analysis of a folder of `.eml` files (`-F`), with CSV export and verbose mode
-- [x] Clean package architecture (`analyzer.py` as core engine, decoupled from CLI)
-- [x] Full type hints across all modules
-- [x] Automated test suite (pytest) — 91 tests across email_parser, url_analyzer, analyzer, and real CLI end-to-end smoke tests, all network calls mocked except the deliberate CLI subprocess tests
-- [x] Rotating ASCII startup banner (figlet "slant" font) with a randomly selected tagline from 69 options, stderr-only and gated off entirely for json/html/cef output plus a `--no-banner` flag
-
-### Phase 1 — URL & domain analysis (in progress)
-
-- [x] Standalone URL/domain input mode (`-u` / `--url`, no `.eml` required)
-- [x] URL structure checks (IP-as-hostname, `@` tricks, excessive subdomains, non-standard port)
-- [x] Suspicious TLD detection
-- [x] Punycode/homograph detection (`xn--` prefix)
-- [x] Typosquatting detection (edit distance against `known_brands.json`)
-- [x] Combosquatting detection (brand substring in non-brand domain)
-- [x] Domain age lookup via RDAP, gated behind `-n`/`--no-intel`
-- [x] SSL/TLS certificate inspection (verification failures + freshly-issued cert detection; a valid cert is explicitly NOT treated as a clean bill of health, see `url_analyzer.py` docstring)
-- [ ] Public-suffix-aware domain parsing (current registrable-domain extraction is a naive last-two-labels split — see `url_analyzer.py` module docstring for the known false positive/negative it causes on ccTLDs like `.co.uk`)
-- [ ] Wire URL findings into the email analyzer's scoring (currently `analyzer.py` only does a crude keyword match on URLs found in emails; the new structural/typosquat checks aren't used there yet)
-
-### Phase 2 — Threat intelligence & heuristics
-
-- [ ] Expanded reputation sources beyond AbuseIPDB/VirusTotal
-- [ ] Advanced heuristics (redirect chain analysis, brand impersonation detection)
-- [ ] Reporting improvements
-
-### Phase 3 — ML, browser extension, API platform
-
-- [x] Email analysis *(delivered early — see Foundation above)*
-- [ ] Machine learning assisted scoring
-- [ ] Browser extension
-- [ ] REST API / web platform
-- [ ] Async DNS and threat intel lookups
-
-### Phase 4 — Community & enterprise
-
-- [ ] Community phishing reporting
-- [ ] Threat dashboards
-- [ ] Real-time monitoring
-- [ ] Enterprise features
-
----
 
 ## Disclaimer
 
-This tool is intended for **educational and defensive security purposes only**. Use it to analyze emails you own or have explicit permission to analyze.
+PhishGuard is for authorized defensive-security analysis and education. Use it only with emails, URLs, systems, and data you are permitted to investigate.
 
----
+## License
 
-*Built as part of a SOC analyst portfolio project by Gursimran Singh.*
+MIT
