@@ -1,6 +1,3 @@
-Copy this into `README.md`:
-
-```markdown
 # PhishGuard
 
 > A Python CLI for helping SOC analysts triage suspicious email files. It extracts evidence, applies explainable risk signals, optionally enriches IOCs, and produces reports for analyst review.
