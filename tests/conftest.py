@@ -16,8 +16,11 @@ them and it's clearer to see the mock right next to the assertion using it.
 """
 
 import os
+import socket
 
+import dns.resolver
 import pytest
+import requests
 
 SAMPLES_DIR = os.path.join(os.path.dirname(__file__), "..", "samples")
 
@@ -77,3 +80,14 @@ def no_real_dns(monkeypatch):
 
     monkeypatch.setattr("phishguard.analyzer.validate_spf_dns", _fake_spf)
     monkeypatch.setattr("phishguard.analyzer.validate_dmarc_dns", _fake_dmarc)
+
+
+@pytest.fixture(autouse=True)
+def block_network_access(monkeypatch):
+    """Fail immediately if a test accidentally attempts a real network call."""
+    def _network_disabled(*_args, **_kwargs):
+        raise AssertionError("Tests must not make real network calls.")
+
+    monkeypatch.setattr(socket, "create_connection", _network_disabled)
+    monkeypatch.setattr(requests.sessions.Session, "request", _network_disabled)
+    monkeypatch.setattr(dns.resolver, "resolve", _network_disabled)

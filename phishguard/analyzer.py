@@ -14,9 +14,10 @@ from typing import Optional
 from phishguard.threat_intel import check_ips, check_urls
 from phishguard.dns_validator import validate_spf_dns, validate_dmarc_dns
 from phishguard import __version__
+from phishguard.security import MAX_IP_ENRICHMENTS, MAX_URL_ENRICHMENTS
 
 
-def analyze(parsed: dict, file_path: str, run_intel: bool = True) -> dict:
+def analyze(parsed: dict, file_path: str, run_intel: bool = False) -> dict:
     """
     Build a structured alert report from parsed email data.
 
@@ -24,7 +25,7 @@ def analyze(parsed: dict, file_path: str, run_intel: bool = True) -> dict:
         parsed:     Output from email_parser.parse_eml()
         file_path:  Path to the original .eml file (used for display only)
         run_intel:  If True, perform external DNS and threat-intelligence
-                    enrichment. Set False for fully offline analysis.
+                    enrichment. Defaults to False for fully offline analysis.
 
     Returns:
         A fully structured report dict ready for text/JSON/HTML/CEF output.
@@ -103,7 +104,11 @@ def analyze(parsed: dict, file_path: str, run_intel: bool = True) -> dict:
     if run_intel:
         print("[*] Running threat intel lookups (this may take a moment)...", file=sys.stderr)
         if parsed.get("ips"):
-            intel_ips = check_ips(parsed["ips"])
+            if len(parsed["ips"]) > MAX_IP_ENRICHMENTS:
+                flags.append(
+                    f"External enrichment limited to the first {MAX_IP_ENRICHMENTS} IP indicators."
+                )
+            intel_ips = check_ips(parsed["ips"][:MAX_IP_ENRICHMENTS])
             for r in intel_ips:
                 if r.get("abuse_confidence_score", 0) >= 50:
                     flags.append(f"High-abuse IP detected: {r['ip']} (score: {r['abuse_confidence_score']}, {r.get('isp', '')})")
@@ -112,7 +117,11 @@ def analyze(parsed: dict, file_path: str, run_intel: bool = True) -> dict:
                     flags.append(f"Reported IP: {r['ip']} (AbuseIPDB score: {r['abuse_confidence_score']})")
                     score += 15
         if urls:
-            intel_urls = check_urls(urls[:3])
+            if len(urls) > MAX_URL_ENRICHMENTS:
+                flags.append(
+                    f"External enrichment limited to the first {MAX_URL_ENRICHMENTS} URL indicators."
+                )
+            intel_urls = check_urls(urls[:MAX_URL_ENRICHMENTS])
             for r in intel_urls:
                 if r.get("malicious", 0) > 0:
                     flags.append(f"Malicious URL detected by VirusTotal: {r.get('url', r.get('indicator', ''))} ({r['malicious']} engines)")

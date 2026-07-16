@@ -12,8 +12,8 @@ where it can be wrong. A tool that just says "85% phishing" with no evidence
 isn't something a SOC analyst can act on or defend to someone else. Each
 check is a pure function with no side effects, except the domain-age RDAP
 lookup, which is the one check that touches the network and is skipped
-entirely when run_intel=False (the -n/--no-intel convention used everywhere
-else in this tool).
+entirely when run_intel=False. The CLI keeps this disabled by default and
+requires explicit `--enrich` consent.
 
 Checks implemented
 -------------------
@@ -497,20 +497,20 @@ def _parse_verified_cert(hostname: str, cert: dict) -> dict:
 # Entry point
 # ---------------------------------------------------------------------------
 
-def analyze_url(url: str, run_intel: bool = True) -> dict:
+def analyze_url(url: str, run_intel: bool = False) -> dict:
     """
     Analyze a single URL or bare domain and return a structured, explainable report.
 
     Args:
         url:       The URL or bare domain to analyze (e.g. "paypa1.com" or
                    "http://paypal-verify.evil.ru/login").
-        run_intel: If True, performs the RDAP domain registration lookup (the
-                   one network call). Same convention as --no-intel elsewhere
-                   in PhishGuard — set False for offline/fast use.
+        run_intel: If True, performs RDAP and TLS network checks. It defaults
+                   to False so standalone analysis stays offline unless a
+                   caller explicitly opts in.
 
     Returns:
         dict with risk_score, risk_level, every finding (each independently
-        explainable), and the domain_registration result if run_intel was True.
+        explainable), plus registration and TLS results when run_intel is True.
     """
     if not re.match(r"^https?://", url, re.IGNORECASE):
         url = "http://" + url  # allow bare domains like "example.com"
@@ -605,4 +605,3 @@ def analyze_url(url: str, run_intel: bool = True) -> dict:
         "domain_registration": domain_registration,
         "ssl_certificate": ssl_result,
     }
-    

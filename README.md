@@ -71,18 +71,20 @@ phishguard -F samples/ --csv results.csv
 # Analyze one URL or domain
 phishguard -u paypa1-verify.com
 
-# URL analysis without RDAP or TLS checks
-phishguard -u http://evil.ru/login -n -o json
+# Explicitly permit external enrichment when appropriate
+phishguard -f samples/phishing_test.eml --enrich
 ```
 
 ## Network and privacy behavior
 
-PhishGuard can contact external services. Treat suspicious emails and IOCs as potentially sensitive data.
+PhishGuard treats suspicious emails and indicators as potentially sensitive data.
+Analysis is offline by default: it does not contact any external service unless
+you explicitly pass `--enrich`.
 
-- Email analysis can perform DNS SPF and DMARC lookups.
-- With API keys configured, email analysis can send extracted IPs to AbuseIPDB and up to three URLs to VirusTotal.
-- Standalone URL analysis can perform an RDAP lookup and a TLS connection to the target host.
-- `--no-intel` performs fully offline analysis: it skips DNS, AbuseIPDB, VirusTotal, RDAP, and TLS lookups.
+- With `--enrich`, email analysis can perform DNS SPF and DMARC lookups.
+- With API keys configured, enrichment can send up to ten extracted IPs to AbuseIPDB and up to three URLs to VirusTotal.
+- With `--enrich`, standalone URL analysis can perform an RDAP lookup and a TLS connection to the target host.
+- Batch enrichment is limited to ten files to contain third-party requests and rate-limit exposure.
 
 PhishGuard does **not** execute attachments or fetch webpage content. Analysts should still use approved sandboxing and investigation procedures for malicious URLs and files.
 
@@ -97,6 +99,21 @@ export VIRUSTOTAL_API_KEY="your_key_here"
 $env:ABUSEIPDB_API_KEY="your_key_here"
 $env:VIRUSTOTAL_API_KEY="your_key_here"
 ```
+
+## Secure-core limits
+
+Before parsing an untrusted message, PhishGuard enforces a 25 MiB file limit
+and a 64 KiB header limit. It also rejects emails with more than 200 MIME
+parts, one million extracted plain-text characters, 100 attachments, or 200
+unique URLs. Batch processing is capped at 100 files and 250 MiB.
+
+These limits are intentional safety boundaries, not indicators of phishing.
+When a limit is exceeded, analysis stops with a clear error rather than
+partially processing an unbounded message.
+
+Reports escape untrusted HTML and CEF values. CSV exports neutralize cells
+that spreadsheet applications could interpret as formulas. API keys are read
+only from environment variables and are never written to reports.
 
 ## Risk levels
 
@@ -131,6 +148,14 @@ Scores are decision-support signals, not proof that a message is malicious. A va
 - [x] Clarify and standardize offline versus external-enrichment behavior
 - [x] Update documentation and remove stale references
 
+### 0.3.1 — Secure core
+
+- [x] Keep analysis offline by default; require explicit enrichment consent
+- [x] Enforce limits for hostile message and batch inputs
+- [x] Protect HTML, CEF, CSV, and terminal output from untrusted content
+- [x] Make network access impossible in ordinary tests
+- [x] Add dependency auditing, static security checks, and update automation
+
 ### 0.4 — Stronger email evidence
 
 - [ ] Extract URLs from HTML email bodies
@@ -146,7 +171,7 @@ Scores are decision-support signals, not proof that a message is malicious. A va
 - [ ] Integrate URL structure and brand-impersonation findings into email triage
 - [ ] Create one shared finding and scoring model
 - [ ] Prevent duplicate findings and inflated scores
-- [ ] Define safe limits for network enrichment during batch analysis
+- [x] Define safe limits for network enrichment during batch analysis
 
 ### 0.6 — Analyst workflow improvements
 

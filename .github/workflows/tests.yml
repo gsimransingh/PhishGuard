@@ -26,3 +26,7 @@ jobs:
         run: python -m pytest
       - name: Verify modules compile
         run: python -m compileall -q phishguard main.py
+      - name: Audit dependencies
+        run: python -m pip_audit --skip-editable
+      - name: Run static security checks
+        run: python -m bandit -q -r phishguard main.py

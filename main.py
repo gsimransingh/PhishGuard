@@ -4,7 +4,7 @@ PhishGuard - Phishing Email Analyzer
 Entry point. All logic lives in the phishguard/ package.
 
 Usage:
-  python main.py -f <path_to_email.eml> [-o json|text|html|cef] [--no-intel]
+  python main.py -f <path_to_email.eml> [-o json|text|html|cef] [--enrich]
 """
 
 from phishguard.cli import main

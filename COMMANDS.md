@@ -57,19 +57,19 @@ phishguard -F samples/ -V
 phishguard -F samples/ --csv results.csv
 ```
 
-## Offline mode and privacy
+## Privacy-first enrichment
 
-Use `--no-intel` whenever the message or indicators must stay local, or when
-you need a fast deterministic run:
+PhishGuard is offline by default. Use `--enrich` only when you have approval
+to send indicators to external DNS, reputation, RDAP, and TLS services:
 
 ```bash
-phishguard -f samples/phishing_test.eml --no-intel
-phishguard -F samples/ --no-intel --csv results.csv
+phishguard -f samples/phishing_test.eml
+phishguard -f samples/phishing_test.eml --enrich
+phishguard -F samples/ --enrich --csv results.csv
 ```
 
-Offline mode skips every external lookup: DNS, AbuseIPDB, VirusTotal, RDAP,
-and TLS. Without it, PhishGuard can query DNS and may contact AbuseIPDB or
-VirusTotal when their API keys are configured.
+`--enrich` is capped at ten files in batch mode. It can query DNS and, with
+configured API keys, contact AbuseIPDB or VirusTotal.
 
 ```powershell
 $env:ABUSEIPDB_API_KEY="your_key_here"
@@ -82,10 +82,17 @@ JSON is written only to standard output; progress messages and the banner are
 written to standard error. This keeps JSON safe for pipelines:
 
 ```bash
-phishguard -f email.eml -o json --no-intel > report.json
+phishguard -f email.eml -o json > report.json
 ```
 
 Use `--no-banner` for scheduled jobs that do not need the startup banner.
+
+## Safety limits
+
+PhishGuard rejects messages over 25 MiB, headers over 64 KiB, more than 200
+MIME parts, one million extracted plain-text characters, 100 attachments, or
+200 unique URLs. Batches are capped at 100 files and 250 MiB. These are safety
+boundaries for hostile inputs, not phishing detections.
 
 ## Help
 

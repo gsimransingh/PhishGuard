@@ -361,9 +361,11 @@ class TestAnalyzeUrl:
         result = analyze_url("not a url at all", run_intel=False)
         assert result["risk_level"] == "LOW"
 
+    @patch("phishguard.url_analyzer.socket.create_connection")
     @patch("phishguard.url_analyzer.requests.get")
-    def test_young_domain_with_short_registration_period_is_flagged(self, mock_get):
+    def test_young_domain_with_short_registration_period_is_flagged(self, mock_get, mock_connect):
         from datetime import datetime, timedelta, timezone
+        mock_connect.side_effect = socket.timeout("TLS intentionally skipped in this RDAP test")
         created = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
         expires = (datetime.now(timezone.utc) + timedelta(days=355)).isoformat()
         mock_get.return_value = Mock(

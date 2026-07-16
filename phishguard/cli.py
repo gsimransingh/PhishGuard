@@ -10,7 +10,7 @@ import json
 import sys
 import os
 import csv
-import random
+import secrets
 from datetime import datetime, timezone
 
 from phishguard.email_parser import parse_eml # type: ignore
@@ -18,6 +18,12 @@ from phishguard.analyzer import analyze # type: ignore
 from phishguard.url_analyzer import analyze_url # type: ignore
 from phishguard.report_generator import generate_html_report, generate_cef_log # type: ignore
 from phishguard import __version__
+from phishguard.security import (
+    EmailLimitError,
+    MAX_BATCH_BYTES,
+    MAX_BATCH_FILES,
+    MAX_ENRICHED_BATCH_FILES,
+)
 
 _VERSION = __version__
 
@@ -44,7 +50,7 @@ def _load_tagline() -> str:
         with open(_TAGLINES_PATH, "r", encoding="utf-8") as f:
             lines = [line.strip() for line in f if line.strip()]
         if lines:
-            return random.choice(lines)
+            return secrets.choice(lines)
     except FileNotFoundError:
         pass
     return "Phishing Email & URL Analysis for SOC Analysts"
@@ -66,6 +72,23 @@ def print_banner(): # type: ignore
     print("", file=sys.stderr) # type: ignore
 
 
+def _safe_terminal_text(value: object) -> str:
+    """Render untrusted values without allowing terminal-control injection."""
+    escaped: list[str] = []
+    for character in str(value):
+        if character == "\n":
+            escaped.append("\\n")
+        elif character == "\r":
+            escaped.append("\\r")
+        elif character == "\t":
+            escaped.append("\\t")
+        elif ord(character) < 32 or ord(character) == 127:
+            escaped.append(f"\\x{ord(character):02x}")
+        else:
+            escaped.append(character)
+    return "".join(escaped)
+
+
 # ---------------------------------------------------------------------------
 # Output Formatters
 # ---------------------------------------------------------------------------
@@ -75,54 +98,54 @@ def print_text_report(report: dict, out=sys.stdout) -> str: # type: ignore
     sep = "=" * 60
     lines = []
     lines.append(sep) # type: ignore
-    lines.append(f"  PhishGuard v{report['version']} - Analysis Report") # type: ignore
-    lines.append(f"  File       : {report['file']}") # type: ignore
-    lines.append(f"  Analyzed   : {report['analyzed_at']}") # type: ignore
+    lines.append(f"  PhishGuard v{_safe_terminal_text(report['version'])} - Analysis Report") # type: ignore
+    lines.append(f"  File       : {_safe_terminal_text(report['file'])}") # type: ignore
+    lines.append(f"  Analyzed   : {_safe_terminal_text(report['analyzed_at'])}") # type: ignore
     lines.append(sep) # type: ignore
-    lines.append(f"  Risk Level : {report['risk_level']} (score: {report['risk_score']})") # type: ignore
+    lines.append(f"  Risk Level : {_safe_terminal_text(report['risk_level'])} (score: {_safe_terminal_text(report['risk_score'])})") # type: ignore
     lines.append(sep) # type: ignore
     lines.append("  Email Metadata:") # type: ignore
     for k, v in report["email_metadata"].items(): # type: ignore
-        lines.append(f"    {k:<12}: {v}") # type: ignore
+        lines.append(f"    {k:<12}: {_safe_terminal_text(v)}") # type: ignore
     lines.append(sep) # type: ignore
     lines.append("  Auth Headers:") # type: ignore
     for k, v in report["auth_headers"].items(): # type: ignore
         status = v if v else "not present" # type: ignore
-        lines.append(f"    {k.upper():<6}: {status[:80]}") # type: ignore
+        lines.append(f"    {k.upper():<6}: {_safe_terminal_text(status[:80])}") # type: ignore
     lines.append(sep) # type: ignore
     lines.append("  DNS Validation:") # type: ignore
     for k, v in report["dns_validation"].items(): # type: ignore
         if v:
-            lines.append(f"    {k.upper():<6}: {v.get('status', 'n/a')} - {v.get('record', '')[:70]}") # type: ignore
+            lines.append(f"    {k.upper():<6}: {_safe_terminal_text(v.get('status', 'n/a'))} - {_safe_terminal_text(v.get('record', '')[:70])}") # type: ignore
     lines.append(sep) # type: ignore
     lines.append("  Flags:") # type: ignore
     if report["flags"]:
         for flag in report["flags"]: # type: ignore
-            lines.append(f"    [!] {flag}") # type: ignore
+            lines.append(f"    [!] {_safe_terminal_text(flag)}") # type: ignore
     else:
         lines.append("    [+] No flags raised.") # type: ignore
     lines.append(sep) # type: ignore
     lines.append("  IOCs:") # type: ignore
     lines.append(f"    URLs        : {len(report['iocs']['urls'])} found") # type: ignore
     for url in report["iocs"]["urls"]: # type: ignore
-        lines.append(f"      - {url}") # type: ignore
-    lines.append(f"    IPs         : {report['iocs']['ips']}") # type: ignore
+        lines.append(f"      - {_safe_terminal_text(url)}") # type: ignore
+    lines.append(f"    IPs         : {_safe_terminal_text(report['iocs']['ips'])}") # type: ignore
     lines.append(f"    Attachments : {len(report['iocs']['attachments'])} found") # type: ignore
     for att in report["iocs"]["attachments"]: # type: ignore
-        lines.append(f"      - {att['filename']} ({att['content_type']}, {att['size_bytes']} bytes)") # type: ignore
+        lines.append(f"      - {_safe_terminal_text(att['filename'])} ({_safe_terminal_text(att['content_type'])}, {_safe_terminal_text(att['size_bytes'])} bytes)") # type: ignore
     lines.append(sep) # type: ignore
     lines.append("  Threat Intel:") # type: ignore
     for r in report["threat_intel"]["ip_checks"]: # type: ignore
         if r.get("error"): # type: ignore
-            lines.append(f"    IP {r.get('indicator', r.get('ip', ''))}: {r['error']}") # pyright: ignore[reportUnknownMemberType]
+            lines.append(f"    IP {_safe_terminal_text(r.get('indicator', r.get('ip', '')))}: {_safe_terminal_text(r['error'])}") # pyright: ignore[reportUnknownMemberType]
         else:
-            lines.append(f"    IP {r['ip']}: AbuseScore={r['abuse_confidence_score']} | Reports={r['total_reports']} | ISP={r.get('isp', '')} | Tor={r.get('is_tor', False)}") # pyright: ignore[reportUnknownMemberType]
+            lines.append(f"    IP {_safe_terminal_text(r['ip'])}: AbuseScore={_safe_terminal_text(r['abuse_confidence_score'])} | Reports={_safe_terminal_text(r['total_reports'])} | ISP={_safe_terminal_text(r.get('isp', ''))} | Tor={_safe_terminal_text(r.get('is_tor', False))}") # pyright: ignore[reportUnknownMemberType]
     for r in report["threat_intel"]["url_checks"]: # pyright: ignore[reportUnknownVariableType]
         if r.get("error"): # pyright: ignore[reportUnknownMemberType]
-            lines.append(f"    URL {r.get('indicator', r.get('url', ''))}: {r['error']}") # type: ignore
+            lines.append(f"    URL {_safe_terminal_text(r.get('indicator', r.get('url', '')))}: {_safe_terminal_text(r['error'])}") # type: ignore
         else:
             url_short = r.get('url', r.get('indicator', ''))[:55] # type: ignore
-            lines.append(f"    URL {url_short}: malicious={r.get('malicious', 0)} | suspicious={r.get('suspicious', 0)}") # type: ignore
+            lines.append(f"    URL {_safe_terminal_text(url_short)}: malicious={_safe_terminal_text(r.get('malicious', 0))} | suspicious={_safe_terminal_text(r.get('suspicious', 0))}") # type: ignore
     if not report["threat_intel"]["ip_checks"] and not report["threat_intel"]["url_checks"]:
         lines.append("    (no threat intel results)") # type: ignore
     lines.append(sep) # type: ignore
@@ -138,41 +161,41 @@ def print_url_report(report: dict, out=sys.stdout) -> str: # type: ignore
     lines = []
     lines.append(sep) # type: ignore
     lines.append("  PhishGuard - URL Analysis Report") # type: ignore
-    lines.append(f"  URL        : {report['url']}") # type: ignore
-    lines.append(f"  Hostname   : {report['hostname']}") # type: ignore
+    lines.append(f"  URL        : {_safe_terminal_text(report['url'])}") # type: ignore
+    lines.append(f"  Hostname   : {_safe_terminal_text(report['hostname'])}") # type: ignore
     lines.append(sep) # type: ignore
-    lines.append(f"  Risk Level : {report['risk_level']} (score: {report['risk_score']})") # type: ignore
+    lines.append(f"  Risk Level : {_safe_terminal_text(report['risk_level'])} (score: {_safe_terminal_text(report['risk_score'])})") # type: ignore
     lines.append(sep) # type: ignore
     lines.append("  Findings:") # type: ignore
     if report["findings"]: # type: ignore
         for f in report["findings"]: # type: ignore
-            lines.append(f"    [!] {f['finding']}") # type: ignore
-            lines.append(f"        check={f['check']} weight={f['weight']} confidence={f['confidence']}") # type: ignore
-            lines.append(f"        note: {f['false_positive_note']}") # type: ignore
+            lines.append(f"    [!] {_safe_terminal_text(f['finding'])}") # type: ignore
+            lines.append(f"        check={_safe_terminal_text(f['check'])} weight={_safe_terminal_text(f['weight'])} confidence={_safe_terminal_text(f['confidence'])}") # type: ignore
+            lines.append(f"        note: {_safe_terminal_text(f['false_positive_note'])}") # type: ignore
     else:
         lines.append("    [+] No structural, brand, or age-based flags raised.") # type: ignore
     lines.append(sep) # type: ignore
     lines.append("  Domain Registration:") # type: ignore
     reg = report.get("domain_registration") # type: ignore
     if reg: # type: ignore
-        lines.append(f"    status={reg['status']} created={reg.get('created')} expires={reg.get('expires')}") # type: ignore
-        lines.append(f"    age_days={reg.get('age_days')} registration_period_days={reg.get('registration_period_days')}") # type: ignore
-        lines.append(f"    registrar={reg.get('registrar') or 'unknown'} (context only, not scored)") # type: ignore
+        lines.append(f"    status={_safe_terminal_text(reg['status'])} created={_safe_terminal_text(reg.get('created'))} expires={_safe_terminal_text(reg.get('expires'))}") # type: ignore
+        lines.append(f"    age_days={_safe_terminal_text(reg.get('age_days'))} registration_period_days={_safe_terminal_text(reg.get('registration_period_days'))}") # type: ignore
+        lines.append(f"    registrar={_safe_terminal_text(reg.get('registrar') or 'unknown')} (context only, not scored)") # type: ignore
         if reg.get("domain_status"): # type: ignore
-            lines.append(f"    domain_status={reg['domain_status']}") # type: ignore
+            lines.append(f"    domain_status={_safe_terminal_text(reg['domain_status'])}") # type: ignore
         if reg.get("error"): # type: ignore
-            lines.append(f"    note: {reg['error']}") # type: ignore
+            lines.append(f"    note: {_safe_terminal_text(reg['error'])}") # type: ignore
     else:
         lines.append("    (skipped — offline mode or no hostname)") # type: ignore
     lines.append(sep) # type: ignore
     lines.append("  SSL/TLS Certificate:") # type: ignore
     tls = report.get("ssl_certificate") # type: ignore
     if tls: # type: ignore
-        lines.append(f"    status={tls['status']} issuer={tls.get('issuer') or 'unknown'}") # type: ignore
+        lines.append(f"    status={_safe_terminal_text(tls['status'])} issuer={_safe_terminal_text(tls.get('issuer') or 'unknown')}") # type: ignore
         if tls.get("not_before"): # type: ignore
-            lines.append(f"    not_before={tls['not_before']} days_since_issued={tls.get('days_since_issued')}") # type: ignore
+            lines.append(f"    not_before={_safe_terminal_text(tls['not_before'])} days_since_issued={_safe_terminal_text(tls.get('days_since_issued'))}") # type: ignore
         if tls.get("error"): # type: ignore
-            lines.append(f"    note: {tls['error']}") # type: ignore
+            lines.append(f"    note: {_safe_terminal_text(tls['error'])}") # type: ignore
     else:
         lines.append("    (skipped — offline mode or no hostname)") # type: ignore
     lines.append(sep) # type: ignore
@@ -196,9 +219,9 @@ def print_batch_summary(results: list[dict], out=sys.stdout) -> str: # type: ign
     lines.append("-" * 70) # type: ignore
     for r in results: # type: ignore
         if r.get("error"): # type: ignore
-            lines.append(f"  {r['file']:<35} {'ERROR':<8} {'N/A':<8} {r['error']}") # type: ignore
+            lines.append(f"  {_safe_terminal_text(r['file']):<35} {'ERROR':<8} {'N/A':<8} {_safe_terminal_text(r['error'])}") # type: ignore
         else:
-            fname = r['file'][:33] + '..' if len(r['file']) > 35 else r['file'] # type: ignore
+            fname = _safe_terminal_text(r['file'][:33] + '..' if len(r['file']) > 35 else r['file']) # type: ignore
             lines.append(f"  {fname:<35} {r['risk_level']:<8} {str(r['risk_score']):<8} {len(r['flags'])} flag(s)") # type: ignore
     lines.append(sep) # type: ignore
 
@@ -219,6 +242,14 @@ def print_batch_summary(results: list[dict], out=sys.stdout) -> str: # type: ign
 # CSV Export
 # ---------------------------------------------------------------------------
 
+def _safe_csv_cell(value: object) -> str:
+    """Prevent spreadsheet software from interpreting untrusted cells as formulas."""
+    text = str(value)
+    if text.lstrip().startswith(("=", "+", "-", "@")):
+        return "'" + text
+    return text
+
+
 def export_csv(results: list[dict], csv_path: str): # type: ignore
     """Export batch results to a CSV file."""
     fieldnames = ["file", "risk_level", "risk_score", "flags", "urls", "ips", "analyzed_at", "error"]
@@ -227,13 +258,13 @@ def export_csv(results: list[dict], csv_path: str): # type: ignore
         writer.writeheader()
         for r in results: # type: ignore
             if r.get("error"): # type: ignore
-                writer.writerow({
+                row = {
                     "file": r["file"], "risk_level": "ERROR",
                     "risk_score": "", "flags": "", "urls": "",
                     "ips": "", "analyzed_at": "", "error": r["error"],
-                })
+                }
             else:
-                writer.writerow({
+                row = {
                     "file":        r["file"],
                     "risk_level":  r["risk_level"],
                     "risk_score":  r["risk_score"],
@@ -242,7 +273,8 @@ def export_csv(results: list[dict], csv_path: str): # type: ignore
                     "ips":         " | ".join(r["iocs"]["ips"]), # type: ignore
                     "analyzed_at": r["analyzed_at"],
                     "error":       "",
-                })
+                }
+            writer.writerow({key: _safe_csv_cell(value) for key, value in row.items()})
     print(f"[*] CSV saved to: {csv_path}", file=sys.stderr)
 
 
@@ -253,12 +285,16 @@ def export_csv(results: list[dict], csv_path: str): # type: ignore
 def run_single(args: argparse.Namespace):
     """Handle single file analysis."""
     if not os.path.isfile(args.file):
-        print(f"[ERROR] File not found: {args.file}", file=sys.stderr)
+        print(f"[ERROR] File not found: {_safe_terminal_text(args.file)}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"[*] Parsing {args.file} ...", file=sys.stderr)
-    parsed = parse_eml(args.file) # type: ignore
-    report = analyze(parsed, args.file, run_intel=not args.no_intel) # type: ignore
+    print(f"[*] Parsing {_safe_terminal_text(args.file)} ...", file=sys.stderr)
+    try:
+        parsed = parse_eml(args.file) # type: ignore
+        report = analyze(parsed, args.file, run_intel=args.enrich) # type: ignore
+    except EmailLimitError as error:
+        print(f"[ERROR] Input rejected: {error}", file=sys.stderr)
+        sys.exit(2)
 
     if args.output == "json":
         content = json.dumps(report, indent=2)
@@ -284,8 +320,8 @@ def run_single(args: argparse.Namespace):
 
 def run_url(args: argparse.Namespace):
     """Handle standalone URL/domain analysis (no .eml file required)."""
-    print(f"[*] Analyzing URL: {args.url} ...", file=sys.stderr)
-    report = analyze_url(args.url, run_intel=not args.no_intel) # type: ignore
+    print(f"[*] Analyzing URL: {_safe_terminal_text(args.url)} ...", file=sys.stderr)
+    report = analyze_url(args.url, run_intel=args.enrich) # type: ignore
 
     if args.output == "json":
         content = json.dumps(report, indent=2)
@@ -310,23 +346,34 @@ def run_batch(args: argparse.Namespace):
     """Handle batch folder analysis."""
     folder = args.folder
     if not os.path.isdir(folder):
-        print(f"[ERROR] Folder not found: {folder}", file=sys.stderr)
+        print(f"[ERROR] Folder not found: {_safe_terminal_text(folder)}", file=sys.stderr)
         sys.exit(1)
 
-    eml_files = [f for f in os.listdir(folder) if f.lower().endswith('.eml')] # type: ignore
+    eml_files = sorted(f for f in os.listdir(folder) if f.lower().endswith('.eml')) # type: ignore
     if not eml_files:
-        print(f"[ERROR] No .eml files found in: {folder}", file=sys.stderr)
+        print(f"[ERROR] No .eml files found in: {_safe_terminal_text(folder)}", file=sys.stderr)
         sys.exit(1)
+    if len(eml_files) > MAX_BATCH_FILES:
+        print(f"[ERROR] Batch contains {len(eml_files)} files; the limit is {MAX_BATCH_FILES}.", file=sys.stderr)
+        sys.exit(2)
 
-    print(f"[*] Found {len(eml_files)} .eml file(s) in {folder}", file=sys.stderr) # type: ignore
+    batch_bytes = sum(os.path.getsize(os.path.join(folder, filename)) for filename in eml_files)
+    if batch_bytes > MAX_BATCH_BYTES:
+        print(f"[ERROR] Batch is {batch_bytes} bytes; the limit is {MAX_BATCH_BYTES} bytes.", file=sys.stderr)
+        sys.exit(2)
+    if args.enrich and len(eml_files) > MAX_ENRICHED_BATCH_FILES:
+        print(f"[ERROR] --enrich supports at most {MAX_ENRICHED_BATCH_FILES} files per batch.", file=sys.stderr)
+        sys.exit(2)
+
+    print(f"[*] Found {len(eml_files)} .eml file(s) in {_safe_terminal_text(folder)}", file=sys.stderr) # type: ignore
 
     results = []
-    for filename in sorted(eml_files): # type: ignore
+    for filename in eml_files: # type: ignore
         file_path = os.path.join(folder, filename) # type: ignore
-        print(f"[*] Analyzing {filename} ...", file=sys.stderr)
+        print(f"[*] Analyzing {_safe_terminal_text(filename)} ...", file=sys.stderr)
         try:
             parsed = parse_eml(file_path) # type: ignore
-            report = analyze(parsed, file_path, run_intel=not args.no_intel) # type: ignore
+            report = analyze(parsed, file_path, run_intel=args.enrich) # type: ignore
             results.append(report) # type: ignore
 
             # Print full report per file if verbose
@@ -363,13 +410,14 @@ Examples:
   python main.py -f email.eml                          # Single file, text output
   python main.py -f email.eml -o json                  # JSON output
   python main.py -f email.eml -o html -O report.html   # Save HTML report
-  python main.py -f email.eml -n                       # Offline mode
+  python main.py -f email.eml                          # Offline mode (default)
+  python main.py -f email.eml --enrich                 # Allow external enrichment
   python main.py -F samples/                           # Batch folder
-  python main.py -F samples/ -n -V                     # Batch with full details
-  python main.py -F samples/ -n --csv results.csv      # Batch with CSV export
-  python main.py -F samples/ -n -O summary.txt         # Save batch summary
+  python main.py -F samples/ -V                        # Batch with full details
+  python main.py -F samples/ --csv results.csv          # Batch with CSV export
+  python main.py -F samples/ -O summary.txt             # Save batch summary
   python main.py -u paypa1-verify.com                  # Standalone URL/domain analysis
-  python main.py -u http://evil.ru/login -n -o json    # Offline URL analysis, JSON output
+  python main.py -u http://evil.ru/login -o json        # Offline URL analysis, JSON output
         """
     )
 
@@ -395,11 +443,18 @@ Examples:
         help="Save output to disk (single: saves report, batch: saves summary)"
     )
 
-    # Threat intel
-    parser.add_argument(
+    # External enrichment is intentionally opt-in because it can send
+    # potentially sensitive indicators to third parties.
+    enrichment_group = parser.add_mutually_exclusive_group()
+    enrichment_group.add_argument(
+        "--enrich",
+        action="store_true",
+        help="Allow external DNS, reputation, RDAP, and TLS lookups"
+    )
+    enrichment_group.add_argument(
         "-n", "--no-intel",
         action="store_true",
-        help="Skip all external DNS, reputation, RDAP, and TLS lookups (offline mode)"
+        help=argparse.SUPPRESS,
     )
 
     # Verbose (batch mode)
