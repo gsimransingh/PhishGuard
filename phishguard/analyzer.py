@@ -13,6 +13,7 @@ from typing import Optional
 
 from phishguard.threat_intel import check_ips, check_urls
 from phishguard.dns_validator import validate_spf_dns, validate_dmarc_dns
+from phishguard import __version__
 
 
 def analyze(parsed: dict, file_path: str, run_intel: bool = True) -> dict:
@@ -22,7 +23,8 @@ def analyze(parsed: dict, file_path: str, run_intel: bool = True) -> dict:
     Args:
         parsed:     Output from email_parser.parse_eml()
         file_path:  Path to the original .eml file (used for display only)
-        run_intel:  If True, enrich IPs and URLs with live threat intel
+        run_intel:  If True, perform external DNS and threat-intelligence
+                    enrichment. Set False for fully offline analysis.
 
     Returns:
         A fully structured report dict ready for text/JSON/HTML/CEF output.
@@ -82,10 +84,10 @@ def analyze(parsed: dict, file_path: str, run_intel: bool = True) -> dict:
             flags.append(f"Risky attachment: {att['filename']}")
             score += 40
 
-    # --- Live DNS validation ---
+    # --- External DNS validation ---
     dns_results: dict[str, Optional[dict]] = {"spf": None, "dmarc": None}
     sender_domain = _extract_domain(sender)
-    if sender_domain:
+    if run_intel and sender_domain:
         dns_results["spf"] = validate_spf_dns(sender_domain)
         dns_results["dmarc"] = validate_dmarc_dns(sender_domain)
         if dns_results["spf"] and dns_results["spf"].get("status") == "not_found":
@@ -132,7 +134,7 @@ def analyze(parsed: dict, file_path: str, run_intel: bool = True) -> dict:
 
     return {
         "tool":        "PhishGuard",
-        "version":     "0.2.0",
+        "version":     __version__,
         "analyzed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "file":        os.path.basename(file_path),
         "risk_level":  risk_level,

@@ -62,12 +62,12 @@ def _get_body(msg: Message) -> str:
 
 
 def _extract_urls(text: str) -> list[str]:
-    """Extract all URLs from a block of text using regex."""
+    """Extract unique URLs from a block of text, preserving their appearance order."""
     url_pattern = re.compile(
         r'https?://[^\s<>"{}|\\^`\[\]]+',
         re.IGNORECASE
     )
-    return list(set(url_pattern.findall(text)))
+    return list(dict.fromkeys(url_pattern.findall(text)))
 
 
 def _is_private_ip(ip: str) -> bool:
@@ -87,11 +87,11 @@ def _is_private_ip(ip: str) -> bool:
 
 
 def _extract_ips(text: str) -> list[str]:
-    """Extract all public IPv4 addresses from a block of text."""
+    """Extract unique public IPv4 addresses, preserving their appearance order."""
     ip_pattern = re.compile(
         r'\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b'
     )
-    all_ips = set(ip_pattern.findall(text))
+    all_ips = dict.fromkeys(ip_pattern.findall(text))
     return [ip for ip in all_ips if not _is_private_ip(ip)]
 
 

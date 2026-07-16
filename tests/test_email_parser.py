@@ -87,6 +87,10 @@ class TestExtractUrls:
         text = "Same link twice: http://example.com http://example.com"
         assert _extract_urls(text) == ["http://example.com"]
 
+    def test_preserves_url_appearance_order(self):
+        text = "First https://first.example then https://second.example then https://first.example"
+        assert _extract_urls(text) == ["https://first.example", "https://second.example"]
+
     def test_no_urls_returns_empty_list(self):
         assert _extract_urls("There are no links in this sentence at all.") == []
 
@@ -145,3 +149,7 @@ class TestExtractIps:
 
     def test_no_ips_in_text_returns_empty_list(self):
         assert _extract_ips("No IP addresses mentioned here.") == []
+
+    def test_preserves_ip_appearance_order(self):
+        text = "185.220.101.47 then 8.8.8.8 then 185.220.101.47"
+        assert _extract_ips(text) == ["185.220.101.47", "8.8.8.8"]

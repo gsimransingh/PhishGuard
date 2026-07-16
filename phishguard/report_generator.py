@@ -1,5 +1,4 @@
-import json
-from datetime import datetime
+from html import escape
 
 # ---------------------------------------------------------------------------
 # Report Generator - HTML & CEF Export Formats
@@ -15,12 +14,63 @@ def generate_html_report(report: dict, output_path: str = None) -> str:
     risk_colors = {"CRITICAL": "#b71c1c", "HIGH": "#e65100", "MEDIUM": "#b8860b", "LOW": "#388e3c"}
     risk_color = risk_colors.get(report["risk_level"], "#757575")
 
+    def html_escape(value: object) -> str:
+        return escape(str(value), quote=True)
+
+    def render_list(values: list[object]) -> str:
+        return '<ul class="ioc-list">' + ''.join(
+            f"<li>{html_escape(value)}</li>" for value in values
+        ) + "</ul>"
+
+    metadata = report["email_metadata"]
+    iocs = report["iocs"]
+    flags_html = ''.join(
+        f'<div class="flag">{html_escape(flag)}</div>' for flag in report["flags"]
+    ) or '<p class="no-data">No flags raised.</p>'
+    urls_html = render_list(iocs["urls"]) if iocs["urls"] else '<p class="no-data">No URLs found.</p>'
+    ips_html = render_list(iocs["ips"]) if iocs["ips"] else '<p class="no-data">No IPs found.</p>'
+    attachments_html = ''.join(
+        "<li>{name} ({content_type}, {size} bytes)</li>".format(
+            name=html_escape(attachment.get("filename", "")),
+            content_type=html_escape(attachment.get("content_type", "")),
+            size=html_escape(attachment.get("size_bytes", 0)),
+        )
+        for attachment in iocs["attachments"]
+    )
+    if attachments_html:
+        attachments_html = f'<ul class="ioc-list">{attachments_html}</ul>'
+    else:
+        attachments_html = '<p class="no-data">No attachments.</p>'
+
+    threat_intel = report.get("threat_intel", {})
+    ip_checks_html = ''.join(
+        '<div class="threat-intel-item"><strong>IP {ip}:</strong> '
+        'AbuseScore={score} | Reports={reports} | ISP={isp} | Tor={tor}</div>'.format(
+            ip=html_escape(result.get("ip", result.get("indicator", ""))),
+            score=html_escape(result.get("abuse_confidence_score", 0)),
+            reports=html_escape(result.get("total_reports", 0)),
+            isp=html_escape(result.get("isp", "N/A")),
+            tor=html_escape(result.get("is_tor", False)),
+        )
+        for result in threat_intel.get("ip_checks", []) if not result.get("error")
+    )
+    url_checks_html = ''.join(
+        '<div class="threat-intel-item"><strong>URL:</strong> {url} | '
+        'Malicious={malicious} | Suspicious={suspicious}</div>'.format(
+            url=html_escape(result.get("url", result.get("indicator", ""))),
+            malicious=html_escape(result.get("malicious", 0)),
+            suspicious=html_escape(result.get("suspicious", 0)),
+        )
+        for result in threat_intel.get("url_checks", []) if not result.get("error")
+    )
+    threat_intel_html = ip_checks_html + url_checks_html or '<p class="no-data">No threat intelligence results.</p>'
+
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PhishGuard Report - {report['file']}</title>
+    <title>PhishGuard Report - {html_escape(report['file'])}</title>
     <style>
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
         body {{
@@ -113,61 +163,59 @@ def generate_html_report(report: dict, output_path: str = None) -> str:
     <div class="container">
         <div class="header">
             <h1>PhishGuard Analysis Report</h1>
-            <div class="version">v{report['version']} | {report['analyzed_at']}</div>
+            <div class="version">v{html_escape(report['version'])} | {html_escape(report['analyzed_at'])}</div>
         </div>
 
         <div class="risk-banner">
-            Risk Level: {report['risk_level']} (Score: {report['risk_score']})
+            Risk Level: {html_escape(report['risk_level'])} (Score: {html_escape(report['risk_score'])})
         </div>
 
         <div class="section">
             <h2>Email Metadata</h2>
             <div class="meta-grid">
-                <div class="meta-label">File:</div><div class="meta-value">{report['file']}</div>
-                <div class="meta-label">Subject:</div><div class="meta-value">{report['email_metadata']['subject']}</div>
-                <div class="meta-label">From:</div><div class="meta-value">{report['email_metadata']['from']}</div>
-                <div class="meta-label">Reply-To:</div><div class="meta-value">{report['email_metadata'].get('reply_to', 'N/A')}</div>
-                <div class="meta-label">To:</div><div class="meta-value">{report['email_metadata']['to']}</div>
-                <div class="meta-label">Date:</div><div class="meta-value">{report['email_metadata']['date']}</div>
-                <div class="meta-label">Message-ID:</div><div class="meta-value">{report['email_metadata']['message_id']}</div>
+                <div class="meta-label">File:</div><div class="meta-value">{html_escape(report['file'])}</div>
+                <div class="meta-label">Subject:</div><div class="meta-value">{html_escape(metadata['subject'])}</div>
+                <div class="meta-label">From:</div><div class="meta-value">{html_escape(metadata['from'])}</div>
+                <div class="meta-label">Reply-To:</div><div class="meta-value">{html_escape(metadata.get('reply_to', 'N/A'))}</div>
+                <div class="meta-label">To:</div><div class="meta-value">{html_escape(metadata['to'])}</div>
+                <div class="meta-label">Date:</div><div class="meta-value">{html_escape(metadata['date'])}</div>
+                <div class="meta-label">Message-ID:</div><div class="meta-value">{html_escape(metadata['message_id'])}</div>
             </div>
         </div>
 
         <div class="section">
             <h2>Authentication Headers</h2>
             <div class="meta-grid">
-                <div class="meta-label">SPF:</div><div class="meta-value">{report['auth_headers']['spf'] or 'Not present'}</div>
-                <div class="meta-label">DKIM:</div><div class="meta-value">{report['auth_headers']['dkim']}</div>
-                <div class="meta-label">DMARC:</div><div class="meta-value">{report['auth_headers']['dmarc'] or 'Not present'}</div>
+                <div class="meta-label">SPF:</div><div class="meta-value">{html_escape(report['auth_headers']['spf'] or 'Not present')}</div>
+                <div class="meta-label">DKIM:</div><div class="meta-value">{html_escape(report['auth_headers']['dkim'])}</div>
+                <div class="meta-label">DMARC:</div><div class="meta-value">{html_escape(report['auth_headers']['dmarc'] or 'Not present')}</div>
             </div>
         </div>
 
         <div class="section">
             <h2>Flags Raised</h2>
-            {''.join([f'<div class="flag">{flag}</div>' for flag in report['flags']]) if report['flags'] else '<p class="no-data">No flags raised.</p>'}
+            {flags_html}
         </div>
 
         <div class="section">
             <h2>Indicators of Compromise (IOCs)</h2>
-            <h3 style="margin-top:15px;">URLs ({len(report['iocs']['urls'])})</h3>
-            {'<ul class="ioc-list">' + ''.join([f'<li>{url}</li>' for url in report['iocs']['urls']]) + '</ul>' if report['iocs']['urls'] else '<p class="no-data">No URLs found.</p>'}
+            <h3 style="margin-top:15px;">URLs ({len(iocs['urls'])})</h3>
+            {urls_html}
 
-            <h3 style="margin-top:15px;">IP Addresses ({len(report['iocs']['ips'])})</h3>
-            {'<ul class="ioc-list">' + ''.join([f'<li>{ip}</li>' for ip in report['iocs']['ips']]) + '</ul>' if report['iocs']['ips'] else '<p class="no-data">No IPs found.</p>'}
+            <h3 style="margin-top:15px;">IP Addresses ({len(iocs['ips'])})</h3>
+            {ips_html}
 
-            <h3 style="margin-top:15px;">Attachments ({len(report['iocs']['attachments'])})</h3>
-            {'<ul class="ioc-list">' + ''.join([f'<li>{a["filename"]} ({a["content_type"]}, {a["size_bytes"]} bytes)</li>' for a in report['iocs']['attachments']]) + '</ul>' if report['iocs']['attachments'] else '<p class="no-data">No attachments.</p>'}
+            <h3 style="margin-top:15px;">Attachments ({len(iocs['attachments'])})</h3>
+            {attachments_html}
         </div>
 
         <div class="section">
             <h2>Threat Intelligence</h2>
-            {''.join([f'<div class="threat-intel-item"><strong>IP {r["ip"]}:</strong> AbuseScore={r["abuse_confidence_score"]} | Reports={r["total_reports"]} | ISP={r.get("isp", "N/A")} | Tor={r.get("is_tor", False)}</div>' for r in report.get('threat_intel', {}).get('ip_checks', []) if not r.get('error')]) if report.get('threat_intel', {}).get('ip_checks') else ''}
-            {''.join([f'<div class="threat-intel-item"><strong>URL:</strong> {r.get("url", r.get("indicator", ""))} | Malicious={r.get("malicious", 0)} | Suspicious={r.get("suspicious", 0)}</div>' for r in report.get('threat_intel', {}).get('url_checks', []) if not r.get('error')]) if report.get('threat_intel', {}).get('url_checks') else ''}
-            {'<p class="no-data">No threat intelligence results.</p>' if not report.get('threat_intel', {}).get('ip_checks') and not report.get('threat_intel', {}).get('url_checks') else ''}
+            {threat_intel_html}
         </div>
 
         <div class="footer">
-            Generated by PhishGuard v{report['version']} | Built for SOC Analysts
+            Generated by PhishGuard v{html_escape(report['version'])} | Built for SOC Analysts
         </div>
     </div>
 </body>
@@ -193,24 +241,31 @@ def generate_cef_log(report: dict) -> str:
     severity_map = {"CRITICAL": 10, "HIGH": 9, "MEDIUM": 6, "LOW": 3}
     severity = severity_map.get(report["risk_level"], 5)
 
-    def escape_cef(s):
-        return str(s).replace('|', '\\|').replace('\\', '\\\\')
+    def escape_cef(value: object) -> str:
+        return (
+            str(value)
+            .replace('\\', '\\\\')
+            .replace('|', '\\|')
+            .replace('=', '\\=')
+            .replace('\r', ' ')
+            .replace('\n', ' ')
+        )
 
     subject = escape_cef(report['email_metadata']['subject'][:100])
     sender = escape_cef(report['email_metadata']['from'])
 
     extensions = []
-    extensions.append(f"src={report['email_metadata']['from']}")
+    extensions.append(f"src={sender}")
     extensions.append(f"suser={sender}")
     extensions.append(f"msg={subject}")
     extensions.append(f"cs1Label=RiskScore cs1={report['risk_score']}")
-    extensions.append(f"cs2Label=Flags cs2={'; '.join(report['flags'][:3]) if report['flags'] else 'None'}")
+    extensions.append(f"cs2Label=Flags cs2={escape_cef('; '.join(report['flags'][:3]) if report['flags'] else 'None')}")
     extensions.append(f"cnt={len(report['flags'])}")
 
     if report['iocs']['urls']:
-        extensions.append(f"request={report['iocs']['urls'][0]}")
+        extensions.append(f"request={escape_cef(report['iocs']['urls'][0])}")
     if report['iocs']['ips']:
-        extensions.append(f"dst={report['iocs']['ips'][0]}")
+        extensions.append(f"dst={escape_cef(report['iocs']['ips'][0])}")
 
     extension_str = ' '.join(extensions)
 

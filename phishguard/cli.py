@@ -17,8 +17,9 @@ from phishguard.email_parser import parse_eml # type: ignore
 from phishguard.analyzer import analyze # type: ignore
 from phishguard.url_analyzer import analyze_url # type: ignore
 from phishguard.report_generator import generate_html_report, generate_cef_log # type: ignore
+from phishguard import __version__
 
-_VERSION = "0.2.0"
+_VERSION = __version__
 
 _DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 _TAGLINES_PATH = os.path.join(_DATA_DIR, "taglines.txt")
@@ -398,7 +399,7 @@ Examples:
     parser.add_argument(
         "-n", "--no-intel",
         action="store_true",
-        help="Skip AbuseIPDB / VirusTotal lookups (offline mode)"
+        help="Skip all external DNS, reputation, RDAP, and TLS lookups (offline mode)"
     )
 
     # Verbose (batch mode)
@@ -418,7 +419,7 @@ Examples:
 
     parser.add_argument("--no-banner", action="store_true",
                         help="Suppress the startup banner (useful for cron/CI/scripted runs)")
-    parser.add_argument("--version", action="version", version="PhishGuard 0.2.0")
+    parser.add_argument("--version", action="version", version=f"PhishGuard {_VERSION}")
 
     args = parser.parse_args()
 
@@ -437,4 +438,3 @@ Examples:
 
 if __name__ == "__main__":
     main()
-    

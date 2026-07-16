@@ -4,7 +4,6 @@
 
 ![Python](https://img.shields.io/badge/Python-3.9%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Version](https://img.shields.io/badge/version-0.2.0-orange)
 
 ## Purpose
 
@@ -32,58 +31,58 @@ Given an `.eml` file, PhishGuard can:
 
 ## Installation
 
-**Supported Python:** Python 3.9 or newer.
+The supported Python versions and runtime dependencies are defined in
+[`pyproject.toml`](pyproject.toml).
 
 ```bash
 git clone https://github.com/gsimransingh/PhishGuard.git
 cd PhishGuard
-python -m pip install -r requirements.txt
+python -m pip install .
 ```
 
 For development and testing:
 
 ```bash
-python -m pip install -r requirements-dev.txt
+python -m pip install -e ".[dev]"
 python -m pytest
 ```
 
 ## Basic usage
 
 ```bash
-# Analyze one email
-python main.py -f samples/phishing_test.eml
+# Analyze one email (the installed command)
+phishguard -f samples/phishing_test.eml
 
 # JSON for scripting or SIEM ingestion
-python main.py -f samples/phishing_test.eml -o json
+phishguard -f samples/phishing_test.eml -o json
 
 # HTML report
-python main.py -f samples/phishing_test.eml -o html -O report.html
+phishguard -f samples/phishing_test.eml -o html -O report.html
 
 # CEF event
-python main.py -f samples/phishing_test.eml -o cef
+phishguard -f samples/phishing_test.eml -o cef
 
 # Batch triage
-python main.py -F samples/ -V
+phishguard -F samples/ -V
 
 # Batch summary as CSV
-python main.py -F samples/ --csv results.csv
+phishguard -F samples/ --csv results.csv
 
 # Analyze one URL or domain
-python main.py -u paypa1-verify.com
+phishguard -u paypa1-verify.com
 
 # URL analysis without RDAP or TLS checks
-python main.py -u http://evil.ru/login -n -o json
+phishguard -u http://evil.ru/login -n -o json
 ```
 
 ## Network and privacy behavior
 
 PhishGuard can contact external services. Treat suspicious emails and IOCs as potentially sensitive data.
 
-- Email analysis performs DNS SPF and DMARC lookups.
-- With API keys configured, email analysis may send extracted IPs to AbuseIPDB and up to three URLs to VirusTotal.
+- Email analysis can perform DNS SPF and DMARC lookups.
+- With API keys configured, email analysis can send extracted IPs to AbuseIPDB and up to three URLs to VirusTotal.
 - Standalone URL analysis can perform an RDAP lookup and a TLS connection to the target host.
-- `--no-intel` skips AbuseIPDB and VirusTotal for email analysis. At present, email DNS validation still runs.
-- `--no-intel` skips RDAP and TLS checks for standalone URL analysis.
+- `--no-intel` performs fully offline analysis: it skips DNS, AbuseIPDB, VirusTotal, RDAP, and TLS lookups.
 
 PhishGuard does **not** execute attachments or fetch webpage content. Analysts should still use approved sandboxing and investigation procedures for malicious URLs and files.
 
@@ -124,13 +123,13 @@ Scores are decision-support signals, not proof that a message is malicious. A va
 
 ### 0.3 — Reliability, safety, and project baseline
 
-- [ ] Make local development and testing reproducible
-- [ ] Add automated CI for tests and quality checks
-- [ ] Define supported Python versions in one place
-- [ ] Make output handling safe for untrusted email content
-- [ ] Make IOC ordering deterministic
-- [ ] Clarify and standardize offline versus external-enrichment behavior
-- [ ] Update documentation and remove stale references
+- [x] Make local development and testing reproducible
+- [x] Add automated CI for tests and quality checks
+- [x] Define supported Python versions in one place
+- [x] Make output handling safe for untrusted email content
+- [x] Make IOC ordering deterministic
+- [x] Clarify and standardize offline versus external-enrichment behavior
+- [x] Update documentation and remove stale references
 
 ### 0.4 — Stronger email evidence
 

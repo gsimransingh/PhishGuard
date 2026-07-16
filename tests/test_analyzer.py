@@ -12,19 +12,12 @@ Covers:
 - Hand-built parsed dicts for scoring paths that don't need a real .eml
   file (risky attachments, suspicious URL keywords).
 
-DNS is stubbed for every test via the autouse `no_real_dns` fixture in
-conftest.py — analyzer.py's DNS validation runs unconditionally regardless
-of run_intel, so this suite always passes run_intel=False to additionally
-skip the rate-limited AbuseIPDB/VirusTotal calls, and relies on the fixture
-to keep DNS off the network too.
+DNS is stubbed for enrichment tests via the autouse `no_real_dns` fixture in
+conftest.py. Offline analysis must not call DNS, AbuseIPDB, VirusTotal, RDAP,
+or TLS services.
 
-Exception: TestCliEndToEnd runs the CLI as a real subprocess to catch
-wiring bugs unit tests can't see (see that class's docstring). A subprocess
-is a separate Python process, so conftest.py's monkeypatch-based DNS stub
-cannot reach it — those specific tests DO make real DNS lookups. This is a
-deliberate, narrow exception to the rest of the suite's network isolation,
-not an oversight, and is bounded by a 30s timeout per test so a network
-hiccup fails loudly instead of hanging CI.
+TestCliEndToEnd runs the CLI in offline mode as a real subprocess to catch
+wiring bugs unit tests cannot see, while remaining network-independent.
 """
 
 import json
@@ -35,6 +28,7 @@ from pathlib import Path
 
 from phishguard.analyzer import _extract_domain, _extract_email_address, analyze
 from phishguard.email_parser import parse_eml
+from phishguard import __version__
 
 PROJECT_ROOT = Path(__file__).parent.parent
 
@@ -247,8 +241,21 @@ class TestDnsNotFoundScoring:
         monkeypatch.setattr("phishguard.analyzer.validate_spf_dns", _fake_spf_not_found)
 
         parsed = _minimal_parsed()
-        report = analyze(parsed, "test.eml", run_intel=False)
+        report = analyze(parsed, "test.eml", run_intel=True)
         assert any("No SPF DNS record found" in f for f in report["flags"])
+
+
+class TestOfflineMode:
+    def test_offline_analysis_skips_dns_validation(self, monkeypatch):
+        def _unexpected_dns_call(_domain):
+            raise AssertionError("offline analysis must not perform DNS validation")
+
+        monkeypatch.setattr("phishguard.analyzer.validate_spf_dns", _unexpected_dns_call)
+        monkeypatch.setattr("phishguard.analyzer.validate_dmarc_dns", _unexpected_dns_call)
+
+        report = analyze(_minimal_parsed(), "test.eml", run_intel=False)
+
+        assert report["dns_validation"] == {"spf": None, "dmarc": None}
 
 
 class TestCliEndToEnd:
@@ -310,14 +317,14 @@ class TestCliEndToEnd:
             [sys.executable, "main.py", "-f", phishing_test_eml, "-n"],
             cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=30,
         )
-        assert "v0.2.0" in result.stderr
+        assert f"v{__version__}" in result.stderr
 
     def test_no_banner_flag_suppresses_it(self, phishing_test_eml):
         result = subprocess.run(
             [sys.executable, "main.py", "-f", phishing_test_eml, "-n", "--no-banner"],
             cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=30,
         )
-        assert "v0.2.0" not in result.stderr
+        assert f"v{__version__}" not in result.stderr
 
     def test_json_output_stdout_is_never_polluted_by_banner(self, phishing_test_eml):
         # The one rule that actually matters for the banner feature: it must
@@ -331,5 +338,5 @@ class TestCliEndToEnd:
         )
         assert result.returncode == 0, result.stderr
         json.loads(result.stdout)  # raises if stdout isn't pure, parseable JSON
-        assert "v0.2.0" not in result.stdout
-        assert "v0.2.0" not in result.stderr  # banner skipped entirely for json mode
+        assert f"v{__version__}" not in result.stdout
+        assert f"v{__version__}" not in result.stderr  # banner skipped entirely for json mode

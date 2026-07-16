@@ -7,11 +7,8 @@ Tests must never depend on live network access — that would make the suite
 slow, flaky, and unusable offline or in CI. This file patches the
 network-touching functions with deterministic stubs by default.
 
-Important quirk this suite has to account for: analyzer.py's live DNS
-validation (validate_spf_dns / validate_dmarc_dns) runs UNCONDITIONALLY —
-it is not gated by run_intel the way the AbuseIPDB/VirusTotal calls are.
-So every analyzer test needs DNS stubbed regardless of which run_intel value
-it passes. The autouse fixture below handles that for the whole suite.
+When tests enable external enrichment, the DNS validators are stubbed by
+default. Offline analysis (run_intel=False) must not call them at all.
 
 Tests that want AbuseIPDB/VirusTotal or RDAP behavior specifically patch
 those functions locally inside the test itself, since not every test needs
@@ -61,10 +58,9 @@ def suspicious_eml() -> str:
 def no_real_dns(monkeypatch):
     """
     Every test gets a stubbed DNS validator by default (SPF/DMARC both
-    "found", both a healthy-looking policy), so nobody has to remember to
-    patch it manually and nobody accidentally writes a test that hits live
-    DNS. A test that specifically wants the "not_found" scoring path just
-    calls monkeypatch.setattr again inside the test body to override this.
+    "found", both a healthy-looking policy), so nobody accidentally writes
+    an enrichment test that hits live DNS. A test that specifically wants
+    the "not_found" scoring path can override either stub in its body.
     """
     def _fake_spf(domain):
         return {"domain": domain, "status": "found", "record": "v=spf1 -all", "error": None}

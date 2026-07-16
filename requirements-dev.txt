@@ -1,2 +1,2 @@
--r requirements.txt
-pytest>=7.4
+# Development install: application dependencies plus the test runner.
+.[dev]
