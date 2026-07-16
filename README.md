@@ -75,6 +75,20 @@ phishguard -u paypa1-verify.com
 phishguard -f samples/phishing_test.eml --enrich
 ```
 
+## Terminal colors
+
+Interactive text reports color the risk level: green for LOW, gold for
+MEDIUM, orange for HIGH, and bold red for CRITICAL. Colors are automatically
+disabled for redirected output and every machine-readable format.
+
+```bash
+phishguard -f email.eml --color always  # force terminal colors
+phishguard -f email.eml --no-color      # disable them
+```
+
+The `NO_COLOR` environment variable disables automatic color. `--color always`
+overrides that preference for an interactive demonstration.
+
 ## Network and privacy behavior
 
 PhishGuard treats suspicious emails and indicators as potentially sensitive data.

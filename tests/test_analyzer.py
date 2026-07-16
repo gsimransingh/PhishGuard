@@ -333,10 +333,11 @@ class TestCliEndToEnd:
         # in json mode's underlying print_banner() function, but main()
         # must gate the call so it's never invoked at all for json/html/cef.
         result = subprocess.run(
-            [sys.executable, "main.py", "-f", phishing_test_eml, "-n", "-o", "json"],
+            [sys.executable, "main.py", "-f", phishing_test_eml, "-n", "-o", "json", "--color", "always"],
             cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=30,
         )
         assert result.returncode == 0, result.stderr
         json.loads(result.stdout)  # raises if stdout isn't pure, parseable JSON
         assert f"v{__version__}" not in result.stdout
         assert f"v{__version__}" not in result.stderr  # banner skipped entirely for json mode
+        assert "\033[" not in result.stdout

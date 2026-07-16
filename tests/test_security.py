@@ -8,7 +8,7 @@ import pytest
 
 from phishguard.analyzer import analyze
 from phishguard import cli
-from phishguard.cli import export_csv, print_text_report
+from phishguard.cli import _should_use_color, export_csv, print_batch_summary, print_text_report
 from phishguard.email_parser import EmailLimitError, _extract_urls, parse_eml
 from phishguard.security import (
     MAX_ATTACHMENTS,
@@ -203,3 +203,68 @@ def test_text_report_neutralizes_control_characters():
 
     assert "\x1b" not in output.getvalue()
     assert "\\x1b[2J\\nforged" in output.getvalue()
+
+
+class _InteractiveBuffer(StringIO):
+    def isatty(self) -> bool:
+        return True
+
+
+def _report_with_risk(level: str) -> dict:
+    return {
+        "version": "0.3.1",
+        "file": "message.eml",
+        "analyzed_at": "today",
+        "risk_level": level,
+        "risk_score": 70,
+        "email_metadata": {
+            "subject": "test",
+            "from": "sender@example.test",
+            "reply_to": "",
+            "to": "recipient@example.test",
+            "date": "today",
+            "message_id": "<id@example.test>",
+        },
+        "auth_headers": {"spf": "pass", "dkim": "present", "dmarc": "pass"},
+        "dns_validation": {"spf": None, "dmarc": None},
+        "flags": [],
+        "iocs": {"urls": [], "ips": [], "attachments": []},
+        "threat_intel": {"ip_checks": [], "url_checks": []},
+    }
+
+
+@pytest.mark.parametrize(("level", "escape"), [
+    ("LOW", "\033[32m"),
+    ("MEDIUM", "\033[38;5;220m"),
+    ("HIGH", "\033[38;5;208m"),
+    ("CRITICAL", "\033[1;31m"),
+])
+def test_text_risk_levels_use_expected_terminal_colors(level, escape):
+    terminal = StringIO()
+
+    saved_content = print_text_report(_report_with_risk(level), out=terminal, color=True)
+
+    assert escape in terminal.getvalue()
+    assert "\033[0m" in terminal.getvalue()
+    assert "\033[" not in saved_content
+
+
+def test_batch_summary_colors_terminal_only():
+    terminal = StringIO()
+
+    saved_content = print_batch_summary([_report_with_risk("HIGH")], out=terminal, color=True)
+
+    assert "\033[38;5;208mHIGH" in terminal.getvalue()
+    assert "\033[" not in saved_content
+
+
+def test_color_mode_respects_tty_and_no_color_environment(monkeypatch):
+    terminal = _InteractiveBuffer()
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("TERM", "xterm-256color")
+
+    assert _should_use_color("auto", terminal) is True
+    monkeypatch.setenv("NO_COLOR", "1")
+    assert _should_use_color("auto", terminal) is False
+    assert _should_use_color("always", terminal) is True
+    assert _should_use_color("never", terminal) is False

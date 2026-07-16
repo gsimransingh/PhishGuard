@@ -87,6 +87,19 @@ phishguard -f email.eml -o json > report.json
 
 Use `--no-banner` for scheduled jobs that do not need the startup banner.
 
+## Terminal colors
+
+Text reports automatically color LOW green, MEDIUM gold, HIGH orange, and
+CRITICAL bold red in an interactive terminal. Colors never appear in JSON,
+CSV, CEF, HTML, saved output, or redirected pipelines.
+
+```bash
+phishguard -f email.eml --color always
+phishguard -f email.eml --no-color
+```
+
+Set `NO_COLOR=1` to disable automatic terminal color across scripts.
+
 ## Safety limits
 
 PhishGuard rejects messages over 25 MiB, headers over 64 KiB, more than 200

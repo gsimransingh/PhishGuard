@@ -30,6 +30,14 @@ _VERSION = __version__
 _DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 _TAGLINES_PATH = os.path.join(_DATA_DIR, "taglines.txt")
 
+_ANSI_RESET = "\033[0m"
+_RISK_COLORS = {
+    "LOW": "\033[32m",          # green
+    "MEDIUM": "\033[38;5;220m", # soft gold
+    "HIGH": "\033[38;5;208m",   # orange
+    "CRITICAL": "\033[1;31m",   # bold red
+}
+
 # figlet "slant" font, generated offline and hardcoded — no pyfiglet
 # dependency needed at runtime for one static string. Plain ASCII only
 # (no Unicode box-drawing), so it renders correctly in plain cmd.exe and
@@ -89,11 +97,30 @@ def _safe_terminal_text(value: object) -> str:
     return "".join(escaped)
 
 
+def _should_use_color(mode: str, stream: object) -> bool:
+    """Enable ANSI color only for an explicitly requested or interactive terminal."""
+    if mode == "never":
+        return False
+    if mode == "always":
+        return True
+    if os.environ.get("NO_COLOR") is not None:
+        return False
+    return bool(getattr(stream, "isatty", lambda: False)()) and os.environ.get("TERM") != "dumb"
+
+
+def _colorize_risk(level: object, text: str, enabled: bool) -> str:
+    """Apply the terminal color associated with a trusted risk-level value."""
+    if not enabled:
+        return text
+    color = _RISK_COLORS.get(str(level).upper())
+    return f"{color}{text}{_ANSI_RESET}" if color else text
+
+
 # ---------------------------------------------------------------------------
 # Output Formatters
 # ---------------------------------------------------------------------------
 
-def print_text_report(report: dict, out=sys.stdout) -> str: # type: ignore
+def print_text_report(report: dict, out=sys.stdout, color: bool = False) -> str: # type: ignore
     """Print a human-readable summary of the report."""
     sep = "=" * 60
     lines = []
@@ -102,7 +129,8 @@ def print_text_report(report: dict, out=sys.stdout) -> str: # type: ignore
     lines.append(f"  File       : {_safe_terminal_text(report['file'])}") # type: ignore
     lines.append(f"  Analyzed   : {_safe_terminal_text(report['analyzed_at'])}") # type: ignore
     lines.append(sep) # type: ignore
-    lines.append(f"  Risk Level : {_safe_terminal_text(report['risk_level'])} (score: {_safe_terminal_text(report['risk_score'])})") # type: ignore
+    risk_line = f"  Risk Level : {_safe_terminal_text(report['risk_level'])} (score: {_safe_terminal_text(report['risk_score'])})" # type: ignore
+    lines.append(_colorize_risk(report["risk_level"], risk_line, color)) # type: ignore
     lines.append(sep) # type: ignore
     lines.append("  Email Metadata:") # type: ignore
     for k, v in report["email_metadata"].items(): # type: ignore
@@ -150,12 +178,16 @@ def print_text_report(report: dict, out=sys.stdout) -> str: # type: ignore
         lines.append("    (no threat intel results)") # type: ignore
     lines.append(sep) # type: ignore
 
-    output = "\n".join(lines) # type: ignore
-    print(output, file=out)
+    display_output = "\n".join(lines) # type: ignore
+    plain_output = _colorize_risk(report["risk_level"], risk_line, False) # type: ignore
+    plain_lines = list(lines)
+    plain_lines[5] = plain_output
+    output = "\n".join(plain_lines) # type: ignore
+    print(display_output, file=out)
     return output
 
 
-def print_url_report(report: dict, out=sys.stdout) -> str: # type: ignore
+def print_url_report(report: dict, out=sys.stdout, color: bool = False) -> str: # type: ignore
     """Print a human-readable summary of a standalone URL analysis."""
     sep = "=" * 60
     lines = []
@@ -164,7 +196,8 @@ def print_url_report(report: dict, out=sys.stdout) -> str: # type: ignore
     lines.append(f"  URL        : {_safe_terminal_text(report['url'])}") # type: ignore
     lines.append(f"  Hostname   : {_safe_terminal_text(report['hostname'])}") # type: ignore
     lines.append(sep) # type: ignore
-    lines.append(f"  Risk Level : {_safe_terminal_text(report['risk_level'])} (score: {_safe_terminal_text(report['risk_score'])})") # type: ignore
+    risk_line = f"  Risk Level : {_safe_terminal_text(report['risk_level'])} (score: {_safe_terminal_text(report['risk_score'])})" # type: ignore
+    lines.append(_colorize_risk(report["risk_level"], risk_line, color)) # type: ignore
     lines.append(sep) # type: ignore
     lines.append("  Findings:") # type: ignore
     if report["findings"]: # type: ignore
@@ -200,30 +233,47 @@ def print_url_report(report: dict, out=sys.stdout) -> str: # type: ignore
         lines.append("    (skipped — offline mode or no hostname)") # type: ignore
     lines.append(sep) # type: ignore
 
-    output = "\n".join(lines) # type: ignore
-    print(output, file=out)
+    display_output = "\n".join(lines) # type: ignore
+    plain_lines = list(lines)
+    plain_lines[5] = risk_line
+    output = "\n".join(plain_lines) # type: ignore
+    print(display_output, file=out)
     return output
 
 
 
-def print_batch_summary(results: list[dict], out=sys.stdout) -> str: # type: ignore
+def print_batch_summary(results: list[dict], out=sys.stdout, color: bool = False) -> str: # type: ignore
     """Print a summary table of batch analysis results."""
     sep = "=" * 70
     lines = []
+    display_lines = []
     lines.append(sep) # type: ignore
+    display_lines.append(sep) # type: ignore
     lines.append(f"  PhishGuard - Batch Analysis Summary") # type: ignore
+    display_lines.append(f"  PhishGuard - Batch Analysis Summary") # type: ignore
     lines.append(f"  Analyzed   : {datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')}") # type: ignore
+    display_lines.append(lines[-1]) # type: ignore
     lines.append(f"  Total Files: {len(results)}") # type: ignore
+    display_lines.append(lines[-1]) # type: ignore
     lines.append(sep) # type: ignore
+    display_lines.append(sep) # type: ignore
     lines.append(f"  {'File':<35} {'Risk':<8} {'Score':<8} {'Flags'}") # type: ignore
+    display_lines.append(lines[-1]) # type: ignore
     lines.append("-" * 70) # type: ignore
+    display_lines.append("-" * 70) # type: ignore
     for r in results: # type: ignore
         if r.get("error"): # type: ignore
-            lines.append(f"  {_safe_terminal_text(r['file']):<35} {'ERROR':<8} {'N/A':<8} {_safe_terminal_text(r['error'])}") # type: ignore
+            row = f"  {_safe_terminal_text(r['file']):<35} {'ERROR':<8} {'N/A':<8} {_safe_terminal_text(r['error'])}" # type: ignore
+            lines.append(row) # type: ignore
+            display_lines.append(row) # type: ignore
         else:
             fname = _safe_terminal_text(r['file'][:33] + '..' if len(r['file']) > 35 else r['file']) # type: ignore
-            lines.append(f"  {fname:<35} {r['risk_level']:<8} {str(r['risk_score']):<8} {len(r['flags'])} flag(s)") # type: ignore
+            risk_cell = f"{r['risk_level']:<8}" # type: ignore
+            lines.append(f"  {fname:<35} {risk_cell} {str(r['risk_score']):<8} {len(r['flags'])} flag(s)") # type: ignore
+            display_risk = _colorize_risk(r["risk_level"], risk_cell, color) # type: ignore
+            display_lines.append(f"  {fname:<35} {display_risk} {str(r['risk_score']):<8} {len(r['flags'])} flag(s)") # type: ignore
     lines.append(sep) # type: ignore
+    display_lines.append(sep) # type: ignore
 
     critical = sum(1 for r in results if r.get("risk_level") == "CRITICAL") # type: ignore
     high   = sum(1 for r in results if r.get("risk_level") == "HIGH") # type: ignore
@@ -231,10 +281,12 @@ def print_batch_summary(results: list[dict], out=sys.stdout) -> str: # type: ign
     low    = sum(1 for r in results if r.get("risk_level") == "LOW") # type: ignore
     errors = sum(1 for r in results if r.get("error")) # type: ignore
     lines.append(f"  CRITICAL: {critical}  |  HIGH: {high}  |  MEDIUM: {medium}  |  LOW: {low}  |  ERRORS: {errors}") # type: ignore
+    display_lines.append(lines[-1]) # type: ignore
     lines.append(sep) # type: ignore
+    display_lines.append(sep) # type: ignore
 
     output = "\n".join(lines) # type: ignore
-    print(output, file=out)
+    print("\n".join(display_lines), file=out) # type: ignore
     return output
 
 
@@ -306,7 +358,7 @@ def run_single(args: argparse.Namespace):
         content = generate_cef_log(report)
         print(content)
     else:
-        content = print_text_report(report)
+        content = print_text_report(report, color=_should_use_color(args.color, sys.stdout))
 
     if args.save_output:
         with open(args.save_output, 'w', encoding='utf-8') as f:
@@ -330,7 +382,7 @@ def run_url(args: argparse.Namespace):
         print(f"[ERROR] Output format '{args.output}' is not yet supported for URL analysis (-u). Use text or json.", file=sys.stderr)
         sys.exit(1)
     else:
-        content = print_url_report(report)
+        content = print_url_report(report, color=_should_use_color(args.color, sys.stdout))
 
     if args.save_output:
         with open(args.save_output, 'w', encoding='utf-8') as f:
@@ -378,13 +430,13 @@ def run_batch(args: argparse.Namespace):
 
             # Print full report per file if verbose
             if args.verbose:
-                print_text_report(report)
+                print_text_report(report, color=_should_use_color(getattr(args, "color", "auto"), sys.stdout))
 
         except Exception as e:
             results.append({"file": filename, "error": str(e)}) # type: ignore
 
     # Always print summary
-    summary = print_batch_summary(results)
+    summary = print_batch_summary(results, color=_should_use_color(getattr(args, "color", "auto"), sys.stdout))
 
     # Save summary to disk if -O specified
     if args.save_output:
@@ -455,6 +507,21 @@ Examples:
         "-n", "--no-intel",
         action="store_true",
         help=argparse.SUPPRESS,
+    )
+
+    color_group = parser.add_mutually_exclusive_group()
+    color_group.add_argument(
+        "--color",
+        choices=["auto", "always", "never"],
+        default="auto",
+        help="Color text risk levels: auto (default), always, or never"
+    )
+    color_group.add_argument(
+        "--no-color",
+        dest="color",
+        action="store_const",
+        const="never",
+        help="Disable terminal colors (same as --color never)"
     )
 
     # Verbose (batch mode)
