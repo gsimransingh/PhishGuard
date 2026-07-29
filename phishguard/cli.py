@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 
 from phishguard.email_parser import parse_eml # type: ignore
 from phishguard.analyzer import analyze # type: ignore
-from phishguard.url_analyzer import analyze_url # type: ignore
+from phishguard.url_analyzer import InvalidURLError, analyze_url # type: ignore
 from phishguard.report_generator import generate_html_report, generate_cef_log # type: ignore
 from phishguard import __version__
 from phishguard.security import (
@@ -373,7 +373,11 @@ def run_single(args: argparse.Namespace):
 def run_url(args: argparse.Namespace):
     """Handle standalone URL/domain analysis (no .eml file required)."""
     print(f"[*] Analyzing URL: {_safe_terminal_text(args.url)} ...", file=sys.stderr)
-    report = analyze_url(args.url, run_intel=args.enrich) # type: ignore
+    try:
+        report = analyze_url(args.url, run_intel=args.enrich) # type: ignore
+    except InvalidURLError as error:
+        print(f"[ERROR] Input rejected: {_safe_terminal_text(error)}", file=sys.stderr)
+        sys.exit(2)
 
     if args.output == "json":
         content = json.dumps(report, indent=2)

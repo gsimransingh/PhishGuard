@@ -102,6 +102,28 @@ you explicitly pass `--enrich`.
 
 PhishGuard does **not** execute attachments or fetch webpage content. Analysts should still use approved sandboxing and investigation procedures for malicious URLs and files.
 
+## Security model
+
+PhishGuard is a decision-support tool, not a sandbox, browser-isolation
+system, malware scanner, or automated blocking control.
+
+Its main trust boundaries are:
+
+- `.eml` files, headers, bodies, attachment metadata, filenames, and URLs are
+  attacker-controlled input.
+- HTML, text, JSON, CSV, and CEF reports can contain attacker-controlled
+  evidence and must be handled as untrusted output.
+- DNS, RDAP, TLS endpoints, and optional reputation services are external
+  dependencies whose responses can be unavailable, incomplete, or hostile.
+- External enrichment can disclose an indicator to a third party, so it
+  requires explicit `--enrich` consent.
+
+The core security invariants are bounded parsing, no execution of analyzed
+content, offline-by-default operation, explicit rejection of malformed URL
+input, and context-appropriate output encoding. See
+[`SECURITY.md`](SECURITY.md) for vulnerability reporting and supported
+security expectations.
+
 ### Optional API keys
 
 ```bash

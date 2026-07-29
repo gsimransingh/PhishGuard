@@ -76,6 +76,35 @@ RDAP_URL = "https://rdap.org/domain/{domain}"
 # Helpers
 # ---------------------------------------------------------------------------
 
+class InvalidURLError(ValueError):
+    """Raised when standalone URL input cannot be analyzed safely."""
+
+
+def _parse_url_input(url: str):
+    """Normalize and validate an HTTP(S) URL or bare hostname."""
+    if not isinstance(url, str) or not url.strip():
+        raise InvalidURLError("URL must include a hostname.")
+
+    normalized = url.strip()
+    explicit_scheme = re.match(r"^([a-z][a-z0-9+.-]*)://", normalized, re.IGNORECASE)
+    if explicit_scheme and explicit_scheme.group(1).lower() not in ("http", "https"):
+        raise InvalidURLError("Only HTTP and HTTPS URLs are supported.")
+    if not explicit_scheme:
+        normalized = "http://" + normalized
+
+    try:
+        parsed = urlparse(normalized)
+        hostname = (parsed.hostname or "").lower()
+        port = parsed.port
+    except ValueError as error:
+        raise InvalidURLError(f"Malformed URL: {error}") from None
+
+    if not hostname or any(character.isspace() for character in hostname):
+        raise InvalidURLError("URL must include a valid hostname.")
+
+    return normalized, parsed, hostname, port
+
+
 def _load_known_brands() -> list:
     """Load the brand list from data/known_brands.json, with a small built-in
     fallback so the tool still functions if the config file is missing or
@@ -138,8 +167,7 @@ def check_url_structure(url: str) -> list:
     what the typosquat and domain-age checks are for.
     """
     findings = []
-    parsed = urlparse(url)
-    hostname = parsed.hostname or ""
+    _, parsed, hostname, port = _parse_url_input(url)
 
     if re.fullmatch(r"(\d{1,3}\.){3}\d{1,3}", hostname):
         findings.append({
@@ -180,10 +208,10 @@ def check_url_structure(url: str) -> list:
             "false_positive_note": "Plenty of legitimate sites use these TLDs too; weak signal alone.",
         })
 
-    if parsed.port and parsed.port not in (80, 443):
+    if port and port not in (80, 443):
         findings.append({
             "check": "nonstandard_port",
-            "finding": f"URL specifies a non-standard port ({parsed.port})",
+            "finding": f"URL specifies a non-standard port ({port})",
             "weight": 10,
             "confidence": "low",
             "false_positive_note": "Common for dev/test environments and some legitimate internal apps.",
@@ -512,11 +540,7 @@ def analyze_url(url: str, run_intel: bool = False) -> dict:
         dict with risk_score, risk_level, every finding (each independently
         explainable), plus registration and TLS results when run_intel is True.
     """
-    if not re.match(r"^https?://", url, re.IGNORECASE):
-        url = "http://" + url  # allow bare domains like "example.com"
-
-    parsed = urlparse(url)
-    hostname = (parsed.hostname or "").lower()
+    url, _, hostname, _ = _parse_url_input(url)
 
     findings = []
     findings += check_url_structure(url)

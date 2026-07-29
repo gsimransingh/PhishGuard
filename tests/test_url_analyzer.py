@@ -24,7 +24,11 @@ import socket
 import ssl
 from unittest.mock import MagicMock, Mock, patch
 
+import pytest
+
+from phishguard import cli
 from phishguard.url_analyzer import (
+    InvalidURLError,
     _levenshtein,
     _registrable_domain,
     analyze_url,
@@ -356,10 +360,38 @@ class TestAnalyzeUrl:
         assert result["risk_level"] == "LOW"
         assert result["findings"] == []
 
-    def test_garbage_input_does_not_raise(self):
-        # Should degrade gracefully to "no findings", not crash.
-        result = analyze_url("not a url at all", run_intel=False)
-        assert result["risk_level"] == "LOW"
+    @pytest.mark.parametrize("url", [
+        "https://",
+        "https://example.com:abc/",
+        "https://example.com:70000/",
+        "not a url at all",
+        "",
+        "ftp://example.com/file",
+    ])
+    def test_invalid_url_is_rejected(self, url):
+        with pytest.raises(InvalidURLError):
+            analyze_url(url, run_intel=False)
+
+    def test_invalid_port_is_rejected_by_structure_check(self):
+        with pytest.raises(InvalidURLError):
+            check_url_structure("https://example.com:abc/")
+
+    def test_cli_reports_invalid_url_without_traceback(self, capsys):
+        args = MagicMock(
+            url="https://example.com:abc/",
+            enrich=False,
+            output="text",
+            color="never",
+            save_output=None,
+        )
+
+        with pytest.raises(SystemExit) as exit_info:
+            cli.run_url(args)
+
+        assert exit_info.value.code == 2
+        captured = capsys.readouterr()
+        assert "[ERROR] Input rejected:" in captured.err
+        assert "Traceback" not in captured.err
 
     @patch("phishguard.url_analyzer.socket.create_connection")
     @patch("phishguard.url_analyzer.requests.get")

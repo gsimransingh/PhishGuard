@@ -39,6 +39,31 @@ def test_html_report_escapes_untrusted_email_content():
     assert "&lt;invoice&gt;.pdf" in html
 
 
+def test_html_report_escapes_untrusted_enrichment_content():
+    report = _report_with_untrusted_content()
+    report["threat_intel"] = {
+        "ip_checks": [{
+            "ip": "<img src=x onerror=alert(1)>",
+            "abuse_confidence_score": 1,
+            "total_reports": 1,
+            "isp": "<script>alert('isp')</script>",
+            "is_tor": False,
+        }],
+        "url_checks": [{
+            "url": "https://example.test/<script>alert(1)</script>",
+            "malicious": 1,
+            "suspicious": 0,
+        }],
+    }
+
+    html = generate_html_report(report)
+
+    assert "<img src=x onerror=alert(1)>" not in html
+    assert "<script>alert('isp')</script>" not in html
+    assert "&lt;img src=x onerror=alert(1)&gt;" in html
+    assert "&lt;script&gt;alert(&#x27;isp&#x27;)&lt;/script&gt;" in html
+
+
 def test_cef_report_escapes_extension_delimiters_and_newlines():
     report = _report_with_untrusted_content()
     report["email_metadata"]["subject"] = "equals=value|pipe\nnext"
