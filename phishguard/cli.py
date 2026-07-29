@@ -153,6 +153,23 @@ def print_text_report(report: dict, out=sys.stdout, color: bool = False) -> str:
     else:
         lines.append("    [+] No flags raised.") # type: ignore
     lines.append(sep) # type: ignore
+    if report.get("findings"):
+        lines.append("  Finding Details:") # type: ignore
+        for finding in report["findings"]: # type: ignore
+            lines.append(
+                "    - {message} [confidence: {confidence}, weight: {weight}]".format(
+                    message=_safe_terminal_text(finding.get("message", "")),
+                    confidence=_safe_terminal_text(finding.get("confidence", "unknown")),
+                    weight=_safe_terminal_text(finding.get("weight", 0)),
+                )
+            )
+            lines.append(
+                f"      Next: {_safe_terminal_text(finding.get('recommended_action', 'Review the evidence.'))}"
+            )
+            lines.append(
+                f"      Caveat: {_safe_terminal_text(finding.get('false_positive_note', 'None documented.'))}"
+            )
+        lines.append(sep) # type: ignore
     lines.append("  IOCs:") # type: ignore
     lines.append(f"    URLs        : {len(report['iocs']['urls'])} found") # type: ignore
     for url in report["iocs"]["urls"]: # type: ignore

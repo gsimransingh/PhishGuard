@@ -10,6 +10,7 @@ import re
 import sys
 from datetime import datetime, timezone
 from typing import Optional
+from urllib.parse import urlparse
 
 from phishguard.threat_intel import check_ips, check_urls
 from phishguard.dns_validator import validate_spf_dns, validate_dmarc_dns
@@ -30,31 +31,82 @@ def analyze(parsed: dict, file_path: str, run_intel: bool = False) -> dict:
     Returns:
         A fully structured report dict ready for text/JSON/HTML/CEF output.
     """
+    findings: list[dict] = []
     flags: list[str] = []
     score: int = 0
 
-    # --- SPF / DKIM / DMARC header checks ---
-    spf: str = parsed.get("spf", "").lower()
-    dkim: str = parsed.get("dkim", "")
-    dmarc: str = parsed.get("dmarc", "").lower()
+    def add_finding(
+        finding_id: str,
+        message: str,
+        weight: int,
+        confidence: str,
+        evidence: dict,
+        false_positive_note: str,
+        recommended_action: str,
+    ) -> None:
+        nonlocal score
+        findings.append({
+            "id": finding_id,
+            "message": message,
+            "weight": weight,
+            "confidence": confidence,
+            "evidence": evidence,
+            "false_positive_note": false_positive_note,
+            "recommended_action": recommended_action,
+        })
+        flags.append(message)
+        score += weight
 
-    if "fail" in spf or "softfail" in spf:
-        flags.append("SPF check failed")
-        score += 30
-    elif not spf:
-        flags.append("SPF header missing")
-        score += 15
+    # --- SPF / DKIM / DMARC interpretation ---
+    auth_evidence = _interpret_authentication(parsed)
+    spf_status = auth_evidence["spf"]["status"]
+    dkim_status = auth_evidence["dkim"]["status"]
+    dmarc_status = auth_evidence["dmarc"]["status"]
 
-    if not dkim:
-        flags.append("DKIM signature missing")
-        score += 20
+    if spf_status in ("fail", "softfail", "permerror"):
+        add_finding(
+            "spf_failure", "SPF check failed", 30, "medium",
+            {"status": spf_status, "source": auth_evidence["spf"]["source"]},
+            "Forwarding and mailing-list infrastructure can legitimately break SPF.",
+            "Validate the trusted receiving server's Authentication-Results header and sender alignment.",
+        )
+    elif spf_status == "missing":
+        add_finding(
+            "spf_missing", "SPF header missing", 15, "low",
+            {"status": spf_status},
+            "Some receiving systems do not preserve SPF results.",
+            "Check the message's trusted Authentication-Results header or perform approved DNS validation.",
+        )
 
-    if "fail" in dmarc:
-        flags.append("DMARC check failed")
-        score += 25
-    elif not dmarc:
-        flags.append("DMARC result missing")
-        score += 10
+    if dkim_status in ("fail", "permerror"):
+        add_finding(
+            "dkim_failure", "DKIM verification failed", 25, "medium",
+            {"status": dkim_status, "source": auth_evidence["dkim"]["source"]},
+            "Messages can be modified in transit by legitimate gateways or mailing lists.",
+            "Validate the trusted receiver's DKIM result and signing-domain alignment.",
+        )
+    elif dkim_status == "missing":
+        add_finding(
+            "dkim_missing", "DKIM signature missing", 20, "low",
+            {"status": dkim_status},
+            "DKIM is not universally deployed and its absence is not proof of spoofing.",
+            "Compare this absence with SPF, DMARC, sender history, and message content.",
+        )
+
+    if dmarc_status in ("fail", "permerror"):
+        add_finding(
+            "dmarc_failure", "DMARC check failed", 25, "high",
+            {"status": dmarc_status, "source": auth_evidence["dmarc"]["source"]},
+            "Forwarding or receiver-specific evaluation can occasionally produce legitimate failures.",
+            "Confirm the trusted receiver's DMARC result and inspect SPF/DKIM alignment.",
+        )
+    elif dmarc_status == "missing":
+        add_finding(
+            "dmarc_missing", "DMARC result missing", 10, "low",
+            {"status": dmarc_status},
+            "The receiving system may not record DMARC results.",
+            "Check trusted gateway logs or perform approved domain-policy validation.",
+        )
 
     # --- Reply-To mismatch ---
     # Compare extracted email addresses, not raw header strings. Comparing
@@ -65,25 +117,46 @@ def analyze(parsed: dict, file_path: str, run_intel: bool = False) -> dict:
     sender: str = parsed.get("from", "")
     reply_to: str = parsed.get("reply_to", "")
     if reply_to and _extract_email_address(reply_to) != _extract_email_address(sender):
-        flags.append(f"Reply-To mismatch: sender={sender}, reply_to={reply_to}")
-        score += 20
+        add_finding(
+            "reply_to_mismatch",
+            f"Reply-To mismatch: sender={sender}, reply_to={reply_to}",
+            20, "medium",
+            {"from": sender, "reply_to": reply_to},
+            "Legitimate services sometimes route replies through a separate support or ticketing domain.",
+            "Verify the Reply-To domain and intended reply workflow through a trusted channel.",
+        )
 
     # --- Suspicious URLs ---
     urls: list[str] = parsed.get("urls", [])
     suspicious_keywords = ["login", "verify", "secure", "account", "update", "confirm", "password", "bank"]
     sus_urls = [u for u in urls if any(kw in u.lower() for kw in suspicious_keywords)]
     if sus_urls:
-        flags.append(f"Suspicious URLs found: {sus_urls}")
-        score += min(len(sus_urls) * 10, 30)
+        add_finding(
+            "suspicious_url_keywords",
+            f"Suspicious URLs found: {sus_urls}",
+            min(len(sus_urls) * 10, 30), "low",
+            {"urls": sus_urls},
+            "Legitimate authentication and account-management pages often contain these words.",
+            "Inspect destination domains and compare them with the claimed sender.",
+        )
+
+    for mismatch in _find_display_destination_mismatches(parsed.get("html_links", [])):
+        add_finding(
+            "display_destination_mismatch",
+            (
+                "Displayed link destination mismatch: "
+                f"{mismatch['displayed_text']} points to {mismatch['href']}"
+            ),
+            35, "high", mismatch,
+            "Legitimate security gateways and marketing platforms sometimes rewrite destinations.",
+            "Do not open the link; verify the displayed and destination domains independently.",
+        )
 
     # --- Attachments ---
     attachments: list[dict] = parsed.get("attachments", [])
-    risky_exts = [".exe", ".js", ".vbs", ".bat", ".ps1", ".docm", ".xlsm", ".zip"]
     for att in attachments:
-        fname = att.get("filename", "").lower()
-        if any(fname.endswith(ext) for ext in risky_exts):
-            flags.append(f"Risky attachment: {att['filename']}")
-            score += 40
+        for attachment_finding in _attachment_findings(att):
+            add_finding(**attachment_finding)
 
     # --- External DNS validation ---
     dns_results: dict[str, Optional[dict]] = {"spf": None, "dmarc": None}
@@ -92,11 +165,21 @@ def analyze(parsed: dict, file_path: str, run_intel: bool = False) -> dict:
         dns_results["spf"] = validate_spf_dns(sender_domain)
         dns_results["dmarc"] = validate_dmarc_dns(sender_domain)
         if dns_results["spf"] and dns_results["spf"].get("status") == "not_found":
-            flags.append(f"No SPF DNS record found for domain: {sender_domain}")
-            score += 10
+            add_finding(
+                "spf_dns_missing",
+                f"No SPF DNS record found for domain: {sender_domain}",
+                10, "low", {"domain": sender_domain},
+                "Some legitimate domains do not publish SPF.",
+                "Confirm the sender domain and organizational mail policy.",
+            )
         if dns_results["dmarc"] and dns_results["dmarc"].get("status") == "not_found":
-            flags.append(f"No DMARC DNS record found for domain: {sender_domain}")
-            score += 10
+            add_finding(
+                "dmarc_dns_missing",
+                f"No DMARC DNS record found for domain: {sender_domain}",
+                10, "low", {"domain": sender_domain},
+                "DMARC deployment is not universal.",
+                "Confirm the sender domain and evaluate other authentication evidence.",
+            )
 
     # --- Threat Intel enrichment ---
     intel_ips: list[dict] = []
@@ -105,27 +188,50 @@ def analyze(parsed: dict, file_path: str, run_intel: bool = False) -> dict:
         print("[*] Running threat intel lookups (this may take a moment)...", file=sys.stderr)
         if parsed.get("ips"):
             if len(parsed["ips"]) > MAX_IP_ENRICHMENTS:
-                flags.append(
-                    f"External enrichment limited to the first {MAX_IP_ENRICHMENTS} IP indicators."
+                add_finding(
+                    "ip_enrichment_limited",
+                    f"External enrichment limited to the first {MAX_IP_ENRICHMENTS} IP indicators.",
+                    0, "high", {"total": len(parsed["ips"]), "limit": MAX_IP_ENRICHMENTS},
+                    "This is an intentional safety limit, not a malicious indicator.",
+                    "Review remaining indicators manually if organizational policy permits.",
                 )
             intel_ips = check_ips(parsed["ips"][:MAX_IP_ENRICHMENTS])
             for r in intel_ips:
                 if r.get("abuse_confidence_score", 0) >= 50:
-                    flags.append(f"High-abuse IP detected: {r['ip']} (score: {r['abuse_confidence_score']}, {r.get('isp', '')})")
-                    score += 35
+                    add_finding(
+                        "high_abuse_ip",
+                        f"High-abuse IP detected: {r['ip']} (score: {r['abuse_confidence_score']}, {r.get('isp', '')})",
+                        35, "medium", r,
+                        "Shared hosting, VPNs, and relays can inherit reports from other users.",
+                        "Correlate the IP with trusted mail headers and current threat intelligence.",
+                    )
                 elif r.get("abuse_confidence_score", 0) > 0:
-                    flags.append(f"Reported IP: {r['ip']} (AbuseIPDB score: {r['abuse_confidence_score']})")
-                    score += 15
+                    add_finding(
+                        "reported_ip",
+                        f"Reported IP: {r['ip']} (AbuseIPDB score: {r['abuse_confidence_score']})",
+                        15, "low", r,
+                        "Low-confidence reports may be stale or relate to another tenant.",
+                        "Correlate the IP with other message and infrastructure evidence.",
+                    )
         if urls:
             if len(urls) > MAX_URL_ENRICHMENTS:
-                flags.append(
-                    f"External enrichment limited to the first {MAX_URL_ENRICHMENTS} URL indicators."
+                add_finding(
+                    "url_enrichment_limited",
+                    f"External enrichment limited to the first {MAX_URL_ENRICHMENTS} URL indicators.",
+                    0, "high", {"total": len(urls), "limit": MAX_URL_ENRICHMENTS},
+                    "This is an intentional safety limit, not a malicious indicator.",
+                    "Review remaining indicators manually if organizational policy permits.",
                 )
             intel_urls = check_urls(urls[:MAX_URL_ENRICHMENTS])
             for r in intel_urls:
                 if r.get("malicious", 0) > 0:
-                    flags.append(f"Malicious URL detected by VirusTotal: {r.get('url', r.get('indicator', ''))} ({r['malicious']} engines)")
-                    score += 40
+                    add_finding(
+                        "malicious_url_reputation",
+                        f"Malicious URL detected by VirusTotal: {r.get('url', r.get('indicator', ''))} ({r['malicious']} engines)",
+                        40, "high", r,
+                        "Reputation results can be stale, disputed, or refer to previously hosted content.",
+                        "Validate the current indicator through approved investigation procedures.",
+                    )
 
     # --- Risk level ---
     # CRITICAL (150+) means both the email's own auth/structure checks
@@ -149,6 +255,7 @@ def analyze(parsed: dict, file_path: str, run_intel: bool = False) -> dict:
         "risk_level":  risk_level,
         "risk_score":  score,
         "flags":       flags,
+        "findings":    findings,
         "email_metadata": {
             "subject":    parsed["subject"],
             "from":       parsed["from"],
@@ -162,11 +269,13 @@ def analyze(parsed: dict, file_path: str, run_intel: bool = False) -> dict:
             "dkim":  "present" if parsed["dkim"] else "missing",
             "dmarc": parsed["dmarc"],
         },
+        "authentication_evidence": auth_evidence,
         "dns_validation": dns_results,
         "iocs": {
             "urls":        parsed["urls"],
             "ips":         parsed["ips"],
             "attachments": parsed["attachments"],
+            "html_links":   parsed.get("html_links", []),
         },
         "threat_intel": {
             "ip_checks":  intel_ips,
@@ -192,3 +301,167 @@ def _extract_email_address(header_value: str) -> str:
     match = re.search(r'<([^<>]+)>', header_value)
     address = match.group(1) if match else header_value
     return address.strip().lower()
+
+
+def _interpret_authentication(parsed: dict) -> dict:
+    """Interpret the closest recorded authentication results conservatively."""
+    authentication_headers = parsed.get("authentication_results") or []
+    closest_result = str(authentication_headers[0]) if authentication_headers else str(parsed.get("dmarc", ""))
+
+    def result_for(mechanism: str) -> tuple[str, str]:
+        match = re.search(
+            rf"\b{mechanism}\s*=\s*(pass|fail|softfail|neutral|none|temperror|permerror|policy)",
+            closest_result,
+            re.IGNORECASE,
+        )
+        if match:
+            return match.group(1).lower(), "Authentication-Results"
+        return "", ""
+
+    spf_status, spf_source = result_for("spf")
+    if not spf_status:
+        received_spf = str(parsed.get("spf", "")).strip()
+        match = re.match(
+            r"(pass|fail|softfail|neutral|none|temperror|permerror)",
+            received_spf,
+            re.IGNORECASE,
+        )
+        if match:
+            spf_status, spf_source = match.group(1).lower(), "Received-SPF"
+
+    dkim_status, dkim_source = result_for("dkim")
+    if not dkim_status:
+        dkim_status = "present_unverified" if parsed.get("dkim") else "missing"
+        dkim_source = "DKIM-Signature" if parsed.get("dkim") else ""
+
+    dmarc_status, dmarc_source = result_for("dmarc")
+
+    return {
+        "spf": {
+            "status": spf_status or "missing",
+            "source": spf_source,
+            "meaning": "Sender-policy evaluation recorded by the receiving system.",
+        },
+        "dkim": {
+            "status": dkim_status,
+            "source": dkim_source,
+            "meaning": (
+                "present_unverified means a signature exists but PhishGuard did not "
+                "cryptographically verify it."
+            ),
+        },
+        "dmarc": {
+            "status": dmarc_status or "missing",
+            "source": dmarc_source,
+            "meaning": "Domain-alignment evaluation recorded by the receiving system.",
+        },
+        "caution": (
+            "Authentication-Results is trusted only when added by the analyst's "
+            "known receiving infrastructure; PhishGuard cannot establish that trust boundary."
+        ),
+    }
+
+
+def _normalized_comparison_domain(value: str) -> str:
+    """Return a conservative domain key for visible-link comparisons."""
+    candidate = value.strip().strip("<>()[]{}.,;:'\"")
+    if not candidate or any(character.isspace() for character in candidate):
+        return ""
+    if not re.match(r"^https?://", candidate, re.IGNORECASE):
+        if not re.fullmatch(r"(?:[a-z0-9-]+\.)+[a-z]{2,}(?:/[^\s]*)?", candidate, re.IGNORECASE):
+            return ""
+        candidate = "http://" + candidate
+    try:
+        hostname = (urlparse(candidate).hostname or "").lower().rstrip(".")
+    except ValueError:
+        return ""
+    if hostname.startswith("www."):
+        hostname = hostname[4:]
+    labels = hostname.split(".")
+    return ".".join(labels[-2:]) if len(labels) >= 2 else hostname
+
+
+def _find_display_destination_mismatches(html_links: list[dict]) -> list[dict]:
+    """Find anchors whose URL-like visible domain differs from the destination."""
+    mismatches: list[dict] = []
+    for link in html_links:
+        displayed_text = str(link.get("displayed_text", "")).strip()
+        href = str(link.get("href", "")).strip()
+        displayed_domain = _normalized_comparison_domain(displayed_text)
+        destination_domain = _normalized_comparison_domain(href)
+        if displayed_domain and destination_domain and displayed_domain != destination_domain:
+            mismatches.append({
+                "displayed_text": displayed_text,
+                "href": href,
+                "displayed_domain": displayed_domain,
+                "destination_domain": destination_domain,
+            })
+    return mismatches
+
+
+_RISKY_ATTACHMENT_EXTENSIONS = {
+    ".bat", ".cmd", ".com", ".docm", ".exe", ".hta", ".img", ".iso",
+    ".jar", ".js", ".lnk", ".msi", ".ps1", ".rar", ".scr", ".vbs",
+    ".xlsm", ".zip", ".7z",
+}
+_BIDI_FILENAME_CHARACTERS = {"\u202a", "\u202b", "\u202d", "\u202e", "\u2066", "\u2067", "\u2068", "\u2069"}
+_EXECUTABLE_CONTENT_TYPES = {
+    "application/x-dosexec", "application/x-msdownload",
+    "application/x-msdos-program", "application/x-executable",
+}
+
+
+def _attachment_findings(attachment: dict) -> list[dict]:
+    """Return explainable filename and content-type findings for an attachment."""
+    filename = str(attachment.get("filename", ""))
+    lowered = filename.lower().rstrip(" .")
+    content_type = str(attachment.get("content_type", "")).lower()
+    findings: list[dict] = []
+
+    final_extension = os.path.splitext(lowered)[1]
+    if final_extension in _RISKY_ATTACHMENT_EXTENSIONS:
+        findings.append({
+            "finding_id": "risky_attachment_extension",
+            "message": f"Risky attachment: {filename}",
+            "weight": 40,
+            "confidence": "medium",
+            "evidence": {"filename": filename, "extension": final_extension, "content_type": content_type},
+            "false_positive_note": "Administrators and developers may legitimately exchange scripts or archives.",
+            "recommended_action": "Do not open it directly; inspect it only in an approved attachment-analysis environment.",
+        })
+
+    filename_parts = lowered.split(".")
+    if len(filename_parts) >= 3 and f".{filename_parts[-1]}" in _RISKY_ATTACHMENT_EXTENSIONS:
+        findings.append({
+            "finding_id": "double_extension_attachment",
+            "message": f"Attachment uses a deceptive double extension: {filename}",
+            "weight": 20,
+            "confidence": "high",
+            "evidence": {"filename": filename},
+            "false_positive_note": "Versioned or generated filenames can contain several periods.",
+            "recommended_action": "Verify the final extension and actual file type before handling the attachment.",
+        })
+
+    if any(character in filename for character in _BIDI_FILENAME_CHARACTERS):
+        findings.append({
+            "finding_id": "bidi_attachment_filename",
+            "message": f"Attachment filename contains bidirectional text controls: {filename}",
+            "weight": 25,
+            "confidence": "high",
+            "evidence": {"filename": filename},
+            "false_positive_note": "Bidirectional controls can occur in legitimate right-to-left filenames.",
+            "recommended_action": "Inspect the raw filename and actual file type in an approved environment.",
+        })
+
+    if content_type in _EXECUTABLE_CONTENT_TYPES and final_extension not in _RISKY_ATTACHMENT_EXTENSIONS:
+        findings.append({
+            "finding_id": "attachment_type_mismatch",
+            "message": f"Attachment type does not match its filename: {filename} ({content_type})",
+            "weight": 30,
+            "confidence": "high",
+            "evidence": {"filename": filename, "extension": final_extension, "content_type": content_type},
+            "false_positive_note": "Some mail clients assign inaccurate generic MIME types.",
+            "recommended_action": "Verify the file signature in an approved sandbox before opening it.",
+        })
+
+    return findings

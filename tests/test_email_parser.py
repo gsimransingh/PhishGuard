@@ -11,12 +11,16 @@ Covers:
   not the whole 172.x.x.x range)
 """
 
+import pytest
+
 from phishguard.email_parser import (
+    _extract_html_links,
     _extract_ips,
     _extract_urls,
     _is_private_ip,
     parse_eml,
 )
+from phishguard.security import EmailLimitError, MAX_URLS
 
 
 # ---------------------------------------------------------------------------
@@ -68,6 +72,24 @@ class TestParseEml:
         assert "fail" in parsed["dmarc"].lower()
         assert parsed["dkim"] == ""  # no DKIM-Signature header in this sample
 
+    def test_extracts_urls_and_visible_text_from_html_only_email(self, html_legitimate_eml):
+        parsed = parse_eml(html_legitimate_eml)
+
+        assert parsed["body_text"] == ""
+        assert len(parsed["html_links"]) == 2
+        assert parsed["html_links"][0]["displayed_text"] == "https://example.com/account/summary"
+        assert parsed["urls"] == [
+            "https://www.example.com/account/summary",
+            "https://www.example.com/help",
+        ]
+
+    def test_does_not_extract_script_or_image_sources(self, html_phishing_eml):
+        parsed = parse_eml(html_phishing_eml)
+
+        assert parsed["urls"] == ["https://paypal-login.evil.example/verify/account"]
+        assert all("ignored.evil.example" not in url for url in parsed["urls"])
+        assert all("tracker.evil.example" not in url for url in parsed["urls"])
+
 
 # ---------------------------------------------------------------------------
 # _extract_urls() — unit tests
@@ -99,6 +121,34 @@ class TestExtractUrls:
         # swallow the closing bracket into the extracted URL.
         text = "See <http://example.com/path> for details."
         assert _extract_urls(text) == ["http://example.com/path"]
+
+
+class TestExtractHtmlLinks:
+    def test_extracts_only_http_anchor_destinations(self):
+        html = (
+            '<a href="https://example.com/reset"><strong>Reset</strong> account</a>'
+            '<a href="javascript:alert(1)">bad</a>'
+            '<img src="https://example.com/pixel">'
+        )
+
+        assert _extract_html_links(html) == [{
+            "href": "https://example.com/reset",
+            "displayed_text": "Reset account",
+        }]
+
+    def test_malformed_unclosed_anchor_is_recovered(self):
+        links = _extract_html_links('<a href="https://example.com">Example')
+
+        assert links == [{"href": "https://example.com", "displayed_text": "Example"}]
+
+    def test_rejects_excessive_html_anchors_during_parsing(self):
+        html = "".join(
+            f'<a href="https://example.test/{index}">{index}</a>'
+            for index in range(MAX_URLS + 1)
+        )
+
+        with pytest.raises(EmailLimitError, match="HTML links"):
+            _extract_html_links(html)
 
 
 # ---------------------------------------------------------------------------

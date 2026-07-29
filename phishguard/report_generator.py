@@ -27,6 +27,16 @@ def generate_html_report(report: dict, output_path: str = None) -> str:
     flags_html = ''.join(
         f'<div class="flag">{html_escape(flag)}</div>' for flag in report["flags"]
     ) or '<p class="no-data">No flags raised.</p>'
+    findings_html = ''.join(
+        '<div class="finding">'
+        f'<strong>{html_escape(finding.get("message", ""))}</strong>'
+        f'<div>Confidence: {html_escape(finding.get("confidence", "unknown"))} | '
+        f'Weight: {html_escape(finding.get("weight", 0))}</div>'
+        f'<div><strong>Next:</strong> {html_escape(finding.get("recommended_action", ""))}</div>'
+        f'<div><strong>Caveat:</strong> {html_escape(finding.get("false_positive_note", ""))}</div>'
+        '</div>'
+        for finding in report.get("findings", [])
+    ) or '<p class="no-data">No detailed findings.</p>'
     urls_html = render_list(iocs["urls"]) if iocs["urls"] else '<p class="no-data">No URLs found.</p>'
     ips_html = render_list(iocs["ips"]) if iocs["ips"] else '<p class="no-data">No IPs found.</p>'
     attachments_html = ''.join(
@@ -132,6 +142,13 @@ def generate_html_report(report: dict, output_path: str = None) -> str:
             color: #333;
         }}
         .flag::before {{ content: "Warning: "; color: #f57c00; font-weight: bold; }}
+        .finding {{
+            background: #fff8e1;
+            border-left: 4px solid #f9a825;
+            padding: 12px;
+            margin: 8px 0;
+            font-size: 14px;
+        }}
         .ioc-list {{ list-style: none; padding-left: 0; }}
         .ioc-list li {{
             background: #f5f5f5;
@@ -195,6 +212,11 @@ def generate_html_report(report: dict, output_path: str = None) -> str:
         <div class="section">
             <h2>Flags Raised</h2>
             {flags_html}
+        </div>
+
+        <div class="section">
+            <h2>Finding Details</h2>
+            {findings_html}
         </div>
 
         <div class="section">

@@ -1,0 +1,20 @@
+Delivered-To: analyst@example.com
+Authentication-Results: mx.example.com; spf=pass smtp.mailfrom=alerts.example.com; dkim=pass header.d=example.com; dmarc=pass header.from=example.com
+Received-SPF: pass
+DKIM-Signature: v=1; d=example.com; s=mail
+From: Example Alerts <alerts@example.com>
+To: analyst@example.com
+Subject: Your weekly account summary
+Date: Wed, 29 Jul 2026 09:00:00 +0000
+Message-ID: <html-legitimate@example.com>
+MIME-Version: 1.0
+Content-Type: text/html; charset=UTF-8
+
+<!doctype html>
+<html>
+  <body>
+    <p>Your weekly account summary is ready.</p>
+    <p><a href="https://www.example.com/account/summary">https://example.com/account/summary</a></p>
+    <p><a href="https://www.example.com/help">View help</a></p>
+  </body>
+</html>
