@@ -7,7 +7,7 @@ name = "phishguard"
 dynamic = ["version"]
 description = "Explainable phishing-email triage for SOC analysts."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = {file = "LICENSE"}
 authors = [{name = "Gursimran Singh"}]
 dependencies = [

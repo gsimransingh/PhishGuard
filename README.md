@@ -2,7 +2,7 @@
 
 > A Python CLI for helping SOC analysts triage suspicious email files. It extracts evidence, applies explainable risk signals, optionally enriches IOCs, and produces reports for analyst review.
 
-![Python](https://img.shields.io/badge/Python-3.9%2B-blue)
+![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ## Purpose
@@ -101,6 +101,28 @@ you explicitly pass `--enrich`.
 - Batch enrichment is limited to ten files to contain third-party requests and rate-limit exposure.
 
 PhishGuard does **not** execute attachments or fetch webpage content. Analysts should still use approved sandboxing and investigation procedures for malicious URLs and files.
+
+## Security model
+
+PhishGuard is a decision-support tool, not a sandbox, browser-isolation
+system, malware scanner, or automated blocking control.
+
+Its main trust boundaries are:
+
+- `.eml` files, headers, bodies, attachment metadata, filenames, and URLs are
+  attacker-controlled input.
+- HTML, text, JSON, CSV, and CEF reports can contain attacker-controlled
+  evidence and must be handled as untrusted output.
+- DNS, RDAP, TLS endpoints, and optional reputation services are external
+  dependencies whose responses can be unavailable, incomplete, or hostile.
+- External enrichment can disclose an indicator to a third party, so it
+  requires explicit `--enrich` consent.
+
+The core security invariants are bounded parsing, no execution of analyzed
+content, offline-by-default operation, explicit rejection of malformed URL
+input, and context-appropriate output encoding. See
+[`SECURITY.md`](SECURITY.md) for vulnerability reporting and supported
+security expectations.
 
 ### Optional API keys
 
