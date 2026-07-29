@@ -1,0 +1,24 @@
+Delivered-To: victim@example.com
+Authentication-Results: mx.example.com; spf=pass smtp.mailfrom=sender.example; dmarc=pass header.from=sender.example
+Received-SPF: pass
+From: Sender <notice@sender.example>
+To: victim@example.com
+Subject: Requested invoice
+Date: Wed, 29 Jul 2026 09:20:00 +0000
+Message-ID: <attachment@sender.example>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="phishguard-boundary"
+
+--phishguard-boundary
+Content-Type: text/plain; charset=UTF-8
+
+Please review the requested invoice.
+
+--phishguard-boundary
+Content-Type: application/x-msdownload; name="invoice.pdf"
+Content-Disposition: attachment; filename="invoice.pdf"
+Content-Transfer-Encoding: base64
+
+TVqQAAMAAAAEAAAA
+
+--phishguard-boundary--

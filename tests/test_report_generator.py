@@ -12,6 +12,15 @@ def _report_with_untrusted_content() -> dict:
         "risk_level": "HIGH",
         "risk_score": 70,
         "flags": ["<script>alert('flag')</script>"],
+        "findings": [{
+            "id": "hostile_test",
+            "message": "<script>alert('finding')</script>",
+            "weight": 10,
+            "confidence": "<b>high</b>",
+            "evidence": {"value": "<img src=x onerror=alert(1)>"},
+            "false_positive_note": "<iframe src=evil>",
+            "recommended_action": "<a href=evil>click</a>",
+        }],
         "email_metadata": {
             "subject": "<script>alert('subject')</script>",
             "from": "sender@example.test",
@@ -37,6 +46,9 @@ def test_html_report_escapes_untrusted_email_content():
     assert "&lt;script&gt;alert(&#x27;subject&#x27;)&lt;/script&gt;" in html
     assert "https://example.test/?q=&lt;tag&gt;" in html
     assert "&lt;invoice&gt;.pdf" in html
+    assert "<script>alert('finding')</script>" not in html
+    assert "&lt;script&gt;alert(&#x27;finding&#x27;)&lt;/script&gt;" in html
+    assert "&lt;a href=evil&gt;click&lt;/a&gt;" in html
 
 
 def test_html_report_escapes_untrusted_enrichment_content():

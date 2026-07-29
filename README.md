@@ -20,11 +20,13 @@ It should help an analyst answer:
 
 Given an `.eml` file, PhishGuard can:
 
-- Parse common email headers and the plain-text body
+- Parse common email headers plus plain-text and HTML bodies without rendering them
+- Extract HTTP(S) anchor destinations and visible link text from HTML
 - Extract URLs, public IPv4 addresses, attachment metadata, and Received headers
-- Read SPF, DKIM, and DMARC-related header results
+- Interpret SPF, DKIM, and DMARC results while preserving the original authentication evidence
 - Look up SPF and DMARC DNS records
-- Flag Reply-To mismatches, suspicious URL keywords, and risky attachment extensions
+- Flag Reply-To mismatches, displayed-link versus destination mismatches, suspicious URL keywords, deceptive filenames, risky extensions, and executable MIME mismatches
+- Explain each finding with its weight, confidence, evidence, false-positive caveat, and recommended next action
 - Check IPs with AbuseIPDB and URLs with VirusTotal when API keys are available
 - Produce text, JSON, HTML, CEF, batch-summary, and CSV output
 - Analyze a standalone URL or domain for structural tricks, typosquatting, RDAP registration signals, and TLS-certificate signals
@@ -140,7 +142,7 @@ $env:VIRUSTOTAL_API_KEY="your_key_here"
 
 Before parsing an untrusted message, PhishGuard enforces a 25 MiB file limit
 and a 64 KiB header limit. It also rejects emails with more than 200 MIME
-parts, one million extracted plain-text characters, 100 attachments, or 200
+parts, one million combined plain-text and HTML characters, 100 attachments, or 200
 unique URLs. Batch processing is capped at 100 files and 250 MiB.
 
 These limits are intentional safety boundaries, not indicators of phishing.
@@ -164,8 +166,9 @@ Scores are decision-support signals, not proof that a message is malicious. A va
 
 ## Known limitations
 
-- Email parsing currently focuses on plain-text content. HTML-only emails and displayed-link versus destination-link mismatches are not yet analyzed.
+- HTML is parsed only for anchor evidence; PhishGuard does not render HTML, fetch images, execute scripts, or interpret CSS-generated content.
 - DKIM signature presence is detected, but PhishGuard does not independently perform full DKIM cryptographic verification.
+- Authentication-Results headers are reported as message evidence, but their trustworthiness depends on where the message was obtained and which mail system added them.
 - DNS records show what a sender domain publishes; they do not independently prove a message passed authentication during delivery.
 - Standalone URL findings are not yet integrated into email URL scoring.
 - Registrable-domain extraction is currently a simple last-two-label approach and can be inaccurate for domains such as `example.co.uk`.
@@ -194,12 +197,12 @@ Scores are decision-support signals, not proof that a message is malicious. A va
 
 ### 0.4 — Stronger email evidence
 
-- [ ] Extract URLs from HTML email bodies
-- [ ] Detect display-text and link-destination mismatches
-- [ ] Improve authentication-result interpretation
-- [ ] Expand attachment metadata and risky-file heuristics
-- [ ] Add representative benign, suspicious, and malicious test fixtures
-- [ ] Improve explainability for each finding
+- [x] Extract URLs from HTML email bodies
+- [x] Detect display-text and link-destination mismatches
+- [x] Improve authentication-result interpretation
+- [x] Expand attachment metadata and risky-file heuristics
+- [x] Add representative benign, suspicious, and malicious test fixtures
+- [x] Improve explainability for each finding
 
 ### 0.5 — Unified URL and email analysis
 
@@ -231,9 +234,8 @@ These are not active implementation commitments until the triage core is reliabl
 ```text
 PhishGuard/
 ├── main.py
-├── requirements.txt
-├── requirements-dev.txt
-├── pytest.ini
+├── pyproject.toml
+├── SECURITY.md
 ├── phishguard/
 │   ├── analyzer.py
 │   ├── cli.py

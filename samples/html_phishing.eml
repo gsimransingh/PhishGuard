@@ -1,0 +1,21 @@
+Delivered-To: victim@example.com
+Authentication-Results: mx.example.com; spf=fail smtp.mailfrom=security@paypal.com; dkim=fail header.d=paypal.com; dmarc=fail header.from=paypal.com
+Received-SPF: fail
+From: PayPal Security <security@paypal.com>
+Reply-To: collect@evil.example
+To: victim@example.com
+Subject: Verify your account immediately
+Date: Wed, 29 Jul 2026 09:10:00 +0000
+Message-ID: <html-phishing@evil.example>
+MIME-Version: 1.0
+Content-Type: text/html; charset=UTF-8
+
+<!doctype html>
+<html>
+  <body>
+    <p>Your account has been restricted.</p>
+    <p><a href="https://paypal-login.evil.example/verify/account">https://www.paypal.com/security</a></p>
+    <script>window.location = "https://ignored.evil.example";</script>
+    <img src="https://tracker.evil.example/pixel.png">
+  </body>
+</html>

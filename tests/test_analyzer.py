@@ -51,6 +51,8 @@ def _minimal_parsed(**overrides) -> dict:
         "spf": "pass",
         "dkim": "present",
         "dmarc": "pass",
+        "authentication_results": [],
+        "html_links": [],
         "urls": [],
         "ips": [],
         "attachments": [],
@@ -134,6 +136,35 @@ class TestAnalyzeSampleEmails:
         assert any("SPF" in f for f in report["flags"])
         assert any("DMARC" in f for f in report["flags"])
 
+    def test_legitimate_html_email_scores_low(self, html_legitimate_eml):
+        parsed = parse_eml(html_legitimate_eml)
+        report = analyze(parsed, html_legitimate_eml, run_intel=False)
+
+        assert report["risk_level"] == "LOW"
+        assert not any("mismatch" in flag.lower() for flag in report["flags"])
+
+    def test_html_phishing_mismatch_is_high_confidence(self, html_phishing_eml):
+        parsed = parse_eml(html_phishing_eml)
+        report = analyze(parsed, html_phishing_eml, run_intel=False)
+
+        mismatch = next(
+            finding for finding in report["findings"]
+            if finding["id"] == "display_destination_mismatch"
+        )
+        assert mismatch["confidence"] == "high"
+        assert mismatch["evidence"]["displayed_domain"] == "paypal.com"
+        assert mismatch["evidence"]["destination_domain"] == "evil.example"
+        assert report["risk_level"] in ("HIGH", "CRITICAL")
+
+    def test_executable_mime_disguised_as_pdf_is_flagged(self, suspicious_attachment_eml):
+        parsed = parse_eml(suspicious_attachment_eml)
+        report = analyze(parsed, suspicious_attachment_eml, run_intel=False)
+
+        assert any(
+            finding["id"] == "attachment_type_mismatch"
+            for finding in report["findings"]
+        )
+
     def test_report_structure_has_expected_top_level_keys(self, phishing_test_eml):
         # Guards against accidentally renaming/removing a key that the CLI
         # or report_generator.py depends on.
@@ -141,7 +172,8 @@ class TestAnalyzeSampleEmails:
         report = analyze(parsed, phishing_test_eml, run_intel=False)
         for key in (
             "tool", "version", "analyzed_at", "file", "risk_level",
-            "risk_score", "flags", "email_metadata", "auth_headers",
+            "risk_score", "flags", "findings", "email_metadata", "auth_headers",
+            "authentication_evidence",
             "dns_validation", "iocs", "threat_intel", "received_chain",
         ):
             assert key in report
@@ -217,6 +249,72 @@ class TestAttachmentScoring:
         ])
         report = analyze(parsed, "test.eml", run_intel=False)
         assert not any("Risky attachment" in f for f in report["flags"])
+
+    def test_double_extension_is_flagged(self):
+        parsed = _minimal_parsed(attachments=[{
+            "filename": "invoice.pdf.exe",
+            "content_type": "application/octet-stream",
+            "size_bytes": 1024,
+        }])
+        report = analyze(parsed, "test.eml", run_intel=False)
+
+        assert any(finding["id"] == "double_extension_attachment" for finding in report["findings"])
+
+    def test_bidirectional_filename_control_is_flagged(self):
+        parsed = _minimal_parsed(attachments=[{
+            "filename": "invoice\u202efdp.exe",
+            "content_type": "application/octet-stream",
+            "size_bytes": 1024,
+        }])
+        report = analyze(parsed, "test.eml", run_intel=False)
+
+        assert any(finding["id"] == "bidi_attachment_filename" for finding in report["findings"])
+
+
+class TestAuthenticationInterpretation:
+    def test_verified_dkim_failure_is_distinct_from_missing_signature(self):
+        parsed = _minimal_parsed(
+            dkim="v=1; d=example.com",
+            authentication_results=[
+                "mx.example; spf=pass; dkim=fail header.d=example.com; dmarc=pass"
+            ],
+        )
+        report = analyze(parsed, "test.eml", run_intel=False)
+
+        assert report["authentication_evidence"]["dkim"]["status"] == "fail"
+        assert "DKIM verification failed" in report["flags"]
+        assert "DKIM signature missing" not in report["flags"]
+
+    def test_signature_presence_is_reported_as_unverified_without_claiming_pass(self):
+        report = analyze(_minimal_parsed(dkim="v=1; d=example.com"), "test.eml", run_intel=False)
+
+        assert report["authentication_evidence"]["dkim"]["status"] == "present_unverified"
+
+
+def test_every_structured_finding_is_explainable():
+    parsed = _minimal_parsed(
+        authentication_results=["mx.example; spf=fail; dkim=fail; dmarc=fail"],
+        html_links=[{
+            "displayed_text": "https://paypal.com",
+            "href": "https://paypal-login.evil.example/verify",
+        }],
+        attachments=[{
+            "filename": "invoice.pdf.exe",
+            "content_type": "application/x-msdownload",
+            "size_bytes": 1024,
+        }],
+    )
+
+    report = analyze(parsed, "test.eml", run_intel=False)
+
+    assert report["findings"]
+    for finding in report["findings"]:
+        assert finding["id"]
+        assert finding["message"]
+        assert finding["confidence"] in ("low", "medium", "high")
+        assert isinstance(finding["evidence"], dict)
+        assert finding["false_positive_note"]
+        assert finding["recommended_action"]
 
 
 class TestSuspiciousUrlScoring:

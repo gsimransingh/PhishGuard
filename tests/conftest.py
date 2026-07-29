@@ -53,6 +53,21 @@ def suspicious_eml() -> str:
     return sample_path("suspicious_email.eml")
 
 
+@pytest.fixture
+def html_legitimate_eml() -> str:
+    return sample_path("html_legitimate.eml")
+
+
+@pytest.fixture
+def html_phishing_eml() -> str:
+    return sample_path("html_phishing.eml")
+
+
+@pytest.fixture
+def suspicious_attachment_eml() -> str:
+    return sample_path("suspicious_attachment.eml")
+
+
 # ---------------------------------------------------------------------------
 # Network isolation
 # ---------------------------------------------------------------------------
