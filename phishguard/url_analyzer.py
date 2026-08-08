@@ -49,6 +49,7 @@ Known limitations (read before trusting the score)
 """
 
 import json
+import ipaddress
 import os
 import re
 import socket
@@ -148,6 +149,23 @@ def _registrable_domain(hostname: str) -> str:
     if len(labels) >= 2:
         return ".".join(labels[-2:])
     return hostname
+
+
+def _is_ip_literal(hostname: str) -> bool:
+    """Return whether a hostname is a literal IPv4 or IPv6 address."""
+    try:
+        ipaddress.ip_address(hostname)
+        return True
+    except ValueError:
+        return False
+
+
+def _is_allowed_ip_literal(hostname: str) -> bool:
+    """Allow enrichment connections only to globally routable IP literals."""
+    try:
+        return ipaddress.ip_address(hostname).is_global
+    except ValueError:
+        return True
 
 
 # ---------------------------------------------------------------------------
@@ -473,6 +491,14 @@ def check_ssl_certificate(hostname: str, port: int = 443, timeout: int = 5) -> d
     environment specifically (firewalls, blocked ports) are common and
     unrelated to the target's legitimacy.
     """
+    if not _is_allowed_ip_literal(hostname):
+        return {
+            "hostname": hostname, "status": "blocked",
+            "issuer": None, "not_before": None, "not_after": None,
+            "days_since_issued": None,
+            "error": "TLS enrichment is blocked for non-public IP addresses",
+        }
+
     try:
         context = ssl.create_default_context()
         with socket.create_connection((hostname, port), timeout=timeout) as sock:
@@ -548,7 +574,7 @@ def analyze_url(url: str, run_intel: bool = False) -> dict:
     findings += check_typosquatting(hostname)
 
     domain_registration = None
-    if run_intel and hostname:
+    if run_intel and hostname and not _is_ip_literal(hostname):
         domain_registration = check_domain_registration(hostname)
 
         if domain_registration["status"] == "found":

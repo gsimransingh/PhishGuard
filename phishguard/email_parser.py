@@ -1,4 +1,4 @@
-import email
+import ipaddress
 import os
 import re
 from email import policy
@@ -219,11 +219,10 @@ def _is_private_ip(ip: str) -> bool:
       - 192.168.0.0/16
       - 127.0.0.0/8 (loopback)
     """
-    if ip.startswith("127.") or ip.startswith("10.") or ip.startswith("192.168."):
+    try:
+        return not ipaddress.ip_address(ip).is_global
+    except ValueError:
         return True
-    if re.match(r'^172\.(1[6-9]|2\d|3[01])\.', ip):
-        return True
-    return False
 
 
 def _extract_ips(text: str) -> list[str]:

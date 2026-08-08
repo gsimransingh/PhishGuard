@@ -60,9 +60,11 @@ def check_ips(ip_list: list[str], api_key: Optional[str] = None) -> list[dict]:
     Adds a 1-second delay between requests to respect rate limits.
     """
     results = []
-    for ip in ip_list:
-        results.append(check_ip_abuseipdb(ip, api_key))
-        time.sleep(1)
+    key = api_key or os.environ.get("ABUSEIPDB_API_KEY", "")
+    for index, ip in enumerate(ip_list):
+        results.append(check_ip_abuseipdb(ip, key))
+        if key and index < len(ip_list) - 1:
+            time.sleep(1)
     return results
 
 
@@ -132,9 +134,11 @@ def check_urls(url_list: list[str], api_key: Optional[str] = None) -> list[dict]
     Adds a 15-second delay between requests to respect free tier rate limits.
     """
     results = []
-    for url in url_list:
-        results.append(check_url_virustotal(url, api_key))
-        time.sleep(15)
+    key = api_key or os.environ.get("VIRUSTOTAL_API_KEY", "")
+    for index, url in enumerate(url_list):
+        results.append(check_url_virustotal(url, key))
+        if key and index < len(url_list) - 1:
+            time.sleep(15)
     return results
 
 

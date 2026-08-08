@@ -182,6 +182,10 @@ class TestIsPrivateIp:
         assert _is_private_ip("185.220.101.47") is False
         assert _is_private_ip("8.8.8.8") is False
 
+    def test_reserved_and_link_local_ips_are_not_treated_as_public(self):
+        assert _is_private_ip("169.254.1.1") is True
+        assert _is_private_ip("192.0.2.1") is True
+
 
 # ---------------------------------------------------------------------------
 # _extract_ips() — integration of extraction + private-IP filtering

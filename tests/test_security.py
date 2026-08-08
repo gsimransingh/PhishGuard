@@ -258,6 +258,17 @@ def test_batch_summary_colors_terminal_only():
     assert "\033[" not in saved_content
 
 
+def test_batch_returns_failure_when_any_file_cannot_be_analyzed(tmp_path):
+    (tmp_path / "valid.eml").write_text("Subject: test\n\nbody", encoding="utf-8")
+    (tmp_path / "invalid.eml").write_bytes(b"X-Long: " + b"A" * (MAX_HEADER_BYTES + 1))
+
+    with pytest.raises(SystemExit, match="1"):
+        cli.run_batch(Namespace(
+            folder=str(tmp_path), enrich=False, verbose=False,
+            save_output=None, csv=None, color="never",
+        ))
+
+
 def test_color_mode_respects_tty_and_no_color_environment(monkeypatch):
     terminal = _InteractiveBuffer()
     monkeypatch.delenv("NO_COLOR", raising=False)

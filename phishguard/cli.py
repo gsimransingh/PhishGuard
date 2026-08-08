@@ -441,6 +441,7 @@ def run_batch(args: argparse.Namespace):
     print(f"[*] Found {len(eml_files)} .eml file(s) in {_safe_terminal_text(folder)}", file=sys.stderr) # type: ignore
 
     results = []
+    had_errors = False
     for filename in eml_files: # type: ignore
         file_path = os.path.join(folder, filename) # type: ignore
         print(f"[*] Analyzing {_safe_terminal_text(filename)} ...", file=sys.stderr)
@@ -454,6 +455,7 @@ def run_batch(args: argparse.Namespace):
                 print_text_report(report, color=_should_use_color(getattr(args, "color", "auto"), sys.stdout))
 
         except Exception as e:
+            had_errors = True
             results.append({"file": filename, "error": str(e)}) # type: ignore
 
     # Always print summary
@@ -468,6 +470,10 @@ def run_batch(args: argparse.Namespace):
     # Export CSV if --csv specified
     if args.csv:
         export_csv(results, args.csv)
+
+    if had_errors:
+        print("[ERROR] One or more files could not be analyzed.", file=sys.stderr)
+        sys.exit(1)
 
 
 # ---------------------------------------------------------------------------

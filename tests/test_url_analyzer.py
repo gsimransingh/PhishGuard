@@ -282,6 +282,13 @@ def _mock_context_manager(return_value):
 
 
 class TestCheckSslCertificate:
+    @patch("phishguard.url_analyzer.socket.create_connection")
+    def test_non_public_ip_literal_is_blocked_before_connection(self, mock_connect):
+        result = check_ssl_certificate("127.0.0.1")
+
+        assert result["status"] == "blocked"
+        mock_connect.assert_not_called()
+
     @patch("phishguard.url_analyzer.ssl.create_default_context")
     @patch("phishguard.url_analyzer.socket.create_connection")
     def test_verified_certificate_is_parsed(self, mock_connect, mock_ctx):
