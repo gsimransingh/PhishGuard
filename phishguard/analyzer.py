@@ -18,7 +18,13 @@ from phishguard import __version__
 from phishguard.security import MAX_IP_ENRICHMENTS, MAX_URL_ENRICHMENTS
 
 
-def analyze(parsed: dict, file_path: str, run_intel: bool = False) -> dict:
+def analyze(
+    parsed: dict,
+    file_path: str,
+    run_intel: bool = False,
+    submit_unknown_urls: bool = False,
+    auth_source: str = "unknown_capture",
+) -> dict:
     """
     Build a structured alert report from parsed email data.
 
@@ -47,6 +53,7 @@ def analyze(parsed: dict, file_path: str, run_intel: bool = False) -> dict:
         nonlocal score
         findings.append({
             "id": finding_id,
+            "check": finding_id,
             "message": message,
             "weight": weight,
             "confidence": confidence,
@@ -222,7 +229,10 @@ def analyze(parsed: dict, file_path: str, run_intel: bool = False) -> dict:
                     "This is an intentional safety limit, not a malicious indicator.",
                     "Review remaining indicators manually if organizational policy permits.",
                 )
-            intel_urls = check_urls(urls[:MAX_URL_ENRICHMENTS])
+            intel_urls = check_urls(
+                urls[:MAX_URL_ENRICHMENTS],
+                submit_unknown=submit_unknown_urls,
+            )
             for r in intel_urls:
                 if r.get("malicious", 0) > 0:
                     add_finding(
@@ -249,6 +259,7 @@ def analyze(parsed: dict, file_path: str, run_intel: bool = False) -> dict:
 
     return {
         "tool":        "PhishGuard",
+        "schema_version": "1.0",
         "version":     __version__,
         "analyzed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "file":        os.path.basename(file_path),
@@ -269,7 +280,7 @@ def analyze(parsed: dict, file_path: str, run_intel: bool = False) -> dict:
             "dkim":  "present" if parsed["dkim"] else "missing",
             "dmarc": parsed["dmarc"],
         },
-        "authentication_evidence": auth_evidence,
+        "authentication_evidence": {**auth_evidence, "source_context": auth_source},
         "dns_validation": dns_results,
         "iocs": {
             "urls":        parsed["urls"],

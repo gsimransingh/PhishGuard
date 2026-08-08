@@ -36,11 +36,11 @@ Checks implemented
 
 Known limitations (read before trusting the score)
 ----------------------------------------------------
-- Registrable-domain extraction is a naive "last two labels" split. It will
-  mis-parse multi-part public suffixes like .co.uk or .com.au (it will treat
-  "co.uk" as the registrable domain of "example.co.uk"). A future version
-  should use a public-suffix-list library (e.g. tldextract) instead. This is
-  a known source of false positives/negatives on ccTLD domains.
+- Registrable-domain extraction uses tldextract's bundled public-suffix
+  snapshot. It handles common multi-part suffixes, but the snapshot can age
+  until the dependency is upgraded.
+- TLS enrichment resolves a hostname once and refuses non-public results, but
+  production deployments should still enforce outbound egress controls.
 - Domain age comes from a public RDAP proxy and can be missing entirely due
   to GDPR privacy redaction or inconsistent registry support. Missing age
   data is NOT itself a red flag, it's scored as "no signal", not suspicious.
@@ -59,6 +59,7 @@ from typing import Optional
 from urllib.parse import urlparse
 
 import requests
+import tldextract
 
 _DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 _BRANDS_PATH = os.path.join(_DATA_DIR, "known_brands.json")
@@ -71,6 +72,10 @@ SUSPICIOUS_TLDS = {
 }
 
 RDAP_URL = "https://rdap.org/domain/{domain}"
+_PUBLIC_SUFFIX_EXTRACT = tldextract.TLDExtract(
+    suffix_list_urls=(),
+    include_psl_private_domains=False,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -79,6 +84,10 @@ RDAP_URL = "https://rdap.org/domain/{domain}"
 
 class InvalidURLError(ValueError):
     """Raised when standalone URL input cannot be analyzed safely."""
+
+
+class EnrichmentTargetBlocked(ValueError):
+    """Raised when enrichment would connect to a non-public target."""
 
 
 def _parse_url_input(url: str):
@@ -144,10 +153,10 @@ def _levenshtein(a: str, b: str) -> int:
 
 
 def _registrable_domain(hostname: str) -> str:
-    """Naive 'last two labels' extraction. See module docstring limitations."""
-    labels = hostname.split(".")
-    if len(labels) >= 2:
-        return ".".join(labels[-2:])
+    """Return the registrable domain using the bundled public suffix snapshot."""
+    extracted = _PUBLIC_SUFFIX_EXTRACT(hostname)
+    if extracted.domain and extracted.suffix:
+        return f"{extracted.domain}.{extracted.suffix}"
     return hostname
 
 
@@ -166,6 +175,28 @@ def _is_allowed_ip_literal(hostname: str) -> bool:
         return ipaddress.ip_address(hostname).is_global
     except ValueError:
         return True
+
+
+def _resolve_enrichment_address(hostname: str, port: int) -> str:
+    """Resolve once and return a globally routable address for TLS enrichment."""
+    if _is_ip_literal(hostname):
+        if not _is_allowed_ip_literal(hostname):
+            raise EnrichmentTargetBlocked(
+                "TLS enrichment is blocked for non-public IP addresses"
+            )
+        return hostname
+
+    addresses = {
+        info[4][0]
+        for info in socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
+    }
+    if not addresses:
+        raise OSError("Hostname did not resolve to an address")
+    if any(not ipaddress.ip_address(address).is_global for address in addresses):
+        raise EnrichmentTargetBlocked(
+            "TLS enrichment is blocked when a hostname resolves to a non-public address"
+        )
+    return sorted(addresses)[0]
 
 
 # ---------------------------------------------------------------------------
@@ -386,10 +417,14 @@ def check_domain_registration(hostname: str, timeout: int = 8) -> dict:
             }
 
         data = resp.json()
+        if not isinstance(data, dict):
+            raise ValueError("RDAP response was not a JSON object")
 
         created = None
         expires = None
         for event in data.get("events", []):
+            if not isinstance(event, dict):
+                continue
             action = event.get("eventAction")
             if action == "registration":
                 created = event.get("eventDate")
@@ -398,11 +433,13 @@ def check_domain_registration(hostname: str, timeout: int = 8) -> dict:
 
         registrar = None
         for entity in data.get("entities", []):
+            if not isinstance(entity, dict):
+                continue
             if "registrar" in entity.get("roles", []):
                 vcard = entity.get("vcardArray")
                 if vcard and len(vcard) > 1:
                     for field in vcard[1]:
-                        if field[0] == "fn":
+                        if len(field) > 3 and field[0] == "fn":
                             registrar = field[3]
                             break
                 break
@@ -434,7 +471,7 @@ def check_domain_registration(hostname: str, timeout: int = 8) -> dict:
             "error": None,
         }
 
-    except requests.RequestException as e:
+    except (requests.RequestException, ValueError, TypeError, KeyError, IndexError) as e:
         return {
             "domain": registrable, "status": "error",
             "created": None, "expires": None, "age_days": None,
@@ -500,12 +537,19 @@ def check_ssl_certificate(hostname: str, port: int = 443, timeout: int = 5) -> d
         }
 
     try:
+        target_address = _resolve_enrichment_address(hostname, port)
         context = ssl.create_default_context()
-        with socket.create_connection((hostname, port), timeout=timeout) as sock:
+        with socket.create_connection((target_address, port), timeout=timeout) as sock:
             with context.wrap_socket(sock, server_hostname=hostname) as ssock:
                 cert = ssock.getpeercert()
                 return _parse_verified_cert(hostname, cert)
 
+    except EnrichmentTargetBlocked as e:
+        return {
+            "hostname": hostname, "status": "blocked",
+            "issuer": None, "not_before": None, "not_after": None,
+            "days_since_issued": None, "error": str(e),
+        }
     except ssl.SSLCertVerificationError as e:
         return {
             "hostname": hostname, "status": "verification_failed",
@@ -647,11 +691,23 @@ def analyze_url(url: str, run_intel: bool = False) -> dict:
 
     return {
         "tool": "PhishGuard",
+        "schema_version": "1.0",
         "url": url,
         "hostname": hostname,
         "risk_score": score,
         "risk_level": risk_level,
-        "findings": findings,
+        "findings": [
+            {
+                **finding,
+                "id": finding.get("id", finding["check"]),
+                "message": finding.get("message", finding["finding"]),
+                "evidence": finding.get("evidence", {"check": finding["check"]}),
+                "recommended_action": finding.get(
+                    "recommended_action", "Review the evidence and validate independently."
+                ),
+            }
+            for finding in findings
+        ],
         "domain_registration": domain_registration,
         "ssl_certificate": ssl_result,
     }

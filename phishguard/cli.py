@@ -360,7 +360,13 @@ def run_single(args: argparse.Namespace):
     print(f"[*] Parsing {_safe_terminal_text(args.file)} ...", file=sys.stderr)
     try:
         parsed = parse_eml(args.file) # type: ignore
-        report = analyze(parsed, args.file, run_intel=args.enrich) # type: ignore
+        report = analyze(
+            parsed,
+            args.file,
+            run_intel=args.enrich,
+            submit_unknown_urls=getattr(args, "submit_unknown_urls", False),
+            auth_source=getattr(args, "auth_source", "unknown_capture"),
+        ) # type: ignore
     except EmailLimitError as error:
         print(f"[ERROR] Input rejected: {error}", file=sys.stderr)
         sys.exit(2)
@@ -447,7 +453,13 @@ def run_batch(args: argparse.Namespace):
         print(f"[*] Analyzing {_safe_terminal_text(filename)} ...", file=sys.stderr)
         try:
             parsed = parse_eml(file_path) # type: ignore
-            report = analyze(parsed, file_path, run_intel=args.enrich) # type: ignore
+            report = analyze(
+                parsed,
+                file_path,
+                run_intel=args.enrich,
+                submit_unknown_urls=getattr(args, "submit_unknown_urls", False),
+                auth_source=getattr(args, "auth_source", "unknown_capture"),
+            ) # type: ignore
             results.append(report) # type: ignore
 
             # Print full report per file if verbose
@@ -536,6 +548,18 @@ Examples:
         help=argparse.SUPPRESS,
     )
 
+    parser.add_argument(
+        "--submit-unknown-urls",
+        action="store_true",
+        help="(Requires --enrich) Submit URLs missing from VirusTotal for analysis",
+    )
+    parser.add_argument(
+        "--auth-source",
+        choices=["unknown_capture", "trusted_gateway", "untrusted_capture"],
+        default="unknown_capture",
+        help="Provenance of authentication headers in the analyzed message",
+    )
+
     color_group = parser.add_mutually_exclusive_group()
     color_group.add_argument(
         "--color",
@@ -571,6 +595,9 @@ Examples:
     parser.add_argument("--version", action="version", version=f"PhishGuard {_VERSION}")
 
     args = parser.parse_args()
+
+    if args.submit_unknown_urls and not args.enrich:
+        parser.error("--submit-unknown-urls requires --enrich")
 
     # Banner only in human-readable text mode, and only to stderr — never
     # for json/html/cef, where it would corrupt piped/redirected output.

@@ -71,23 +71,19 @@ class TestLevenshtein:
 
 
 # ---------------------------------------------------------------------------
-# _registrable_domain() — documents the known naive-parsing limitation
+# _registrable_domain() — public-suffix-aware parsing
 # ---------------------------------------------------------------------------
 
 class TestRegistrableDomain:
     def test_simple_two_label_domain(self):
         assert _registrable_domain("paypal.com") == "paypal.com"
 
-    def test_subdomain_reduces_to_last_two_labels(self):
+    def test_subdomain_reduces_to_registrable_domain(self):
         assert _registrable_domain("login.paypal.com") == "paypal.com"
 
-    def test_known_limitation_multipart_tld_is_mis_parsed(self):
-        # Documented in the module docstring: this naive split treats the
-        # public suffix "co.uk" as if it were the registrable domain, which
-        # is wrong. Asserting the current (wrong) behavior on purpose so a
-        # future fix to use a public-suffix-list is a visible, intentional
-        # change rather than a silent behavior shift nobody notices.
-        assert _registrable_domain("example.co.uk") == "co.uk"
+    def test_multipart_public_suffix_is_parsed_correctly(self):
+        assert _registrable_domain("example.co.uk") == "example.co.uk"
+        assert _registrable_domain("login.example.co.uk") == "example.co.uk"
 
 
 # ---------------------------------------------------------------------------
@@ -255,6 +251,16 @@ class TestCheckDomainRegistration:
         assert result["status"] == "error"
         assert "connection refused" in result["error"]
 
+    @patch("phishguard.url_analyzer.requests.get")
+    def test_malformed_rdap_date_returns_structured_error(self, mock_get):
+        mock_get.return_value = Mock(
+            status_code=200,
+            json=lambda: {"events": [{"eventAction": "registration", "eventDate": "not-a-date"}]},
+        )
+        result = check_domain_registration("malformed.example")
+        assert result["status"] == "error"
+        assert result["age_days"] is None
+
     def test_registrar_name_alone_never_adds_a_finding(self):
         # Design decision under test: registrar identity is informational
         # only and must never be scored on its own. There is no
@@ -289,9 +295,11 @@ class TestCheckSslCertificate:
         assert result["status"] == "blocked"
         mock_connect.assert_not_called()
 
+    @patch("phishguard.url_analyzer.socket.getaddrinfo")
     @patch("phishguard.url_analyzer.ssl.create_default_context")
     @patch("phishguard.url_analyzer.socket.create_connection")
-    def test_verified_certificate_is_parsed(self, mock_connect, mock_ctx):
+    def test_verified_certificate_is_parsed(self, mock_connect, mock_ctx, mock_getaddrinfo):
+        mock_getaddrinfo.return_value = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
         mock_sock = MagicMock()
         mock_connect.return_value = _mock_context_manager(mock_sock)
 
@@ -311,9 +319,11 @@ class TestCheckSslCertificate:
         assert result["days_since_issued"] is not None
         assert result["days_since_issued"] > 1000  # issued in 2020, definitely not "fresh"
 
+    @patch("phishguard.url_analyzer.socket.getaddrinfo")
     @patch("phishguard.url_analyzer.ssl.create_default_context")
     @patch("phishguard.url_analyzer.socket.create_connection")
-    def test_verification_failure_is_caught_not_raised(self, mock_connect, mock_ctx):
+    def test_verification_failure_is_caught_not_raised(self, mock_connect, mock_ctx, mock_getaddrinfo):
+        mock_getaddrinfo.return_value = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
         mock_connect.return_value = _mock_context_manager(MagicMock())
 
         mock_context = MagicMock()
@@ -324,20 +334,34 @@ class TestCheckSslCertificate:
         assert result["status"] == "verification_failed"
         assert "self-signed" in result["error"]
 
+    @patch("phishguard.url_analyzer.socket.getaddrinfo")
     @patch("phishguard.url_analyzer.socket.create_connection")
-    def test_connection_failure_is_caught_not_raised(self, mock_connect):
+    def test_connection_failure_is_caught_not_raised(self, mock_connect, mock_getaddrinfo):
+        mock_getaddrinfo.return_value = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
         mock_connect.side_effect = socket.timeout("timed out")
 
         result = check_ssl_certificate("unreachable.example.com")
         assert result["status"] == "unavailable"
         assert result["issuer"] is None
 
+    @patch("phishguard.url_analyzer.socket.getaddrinfo")
     @patch("phishguard.url_analyzer.socket.create_connection")
-    def test_dns_failure_is_caught_not_raised(self, mock_connect):
-        mock_connect.side_effect = socket.gaierror("Name or service not known")
+    def test_dns_failure_is_caught_not_raised(self, mock_connect, mock_getaddrinfo):
+        mock_getaddrinfo.side_effect = socket.gaierror("Name or service not known")
 
         result = check_ssl_certificate("does-not-resolve.example.com")
         assert result["status"] == "unavailable"
+        mock_connect.assert_not_called()
+
+    @patch("phishguard.url_analyzer.socket.getaddrinfo")
+    @patch("phishguard.url_analyzer.socket.create_connection")
+    def test_hostname_resolving_to_private_address_is_blocked(self, mock_connect, mock_getaddrinfo):
+        mock_getaddrinfo.return_value = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 443))]
+
+        result = check_ssl_certificate("internal.example.com")
+
+        assert result["status"] == "blocked"
+        mock_connect.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -366,6 +390,16 @@ class TestAnalyzeUrl:
         result = analyze_url("https://www.python.org", run_intel=False)
         assert result["risk_level"] == "LOW"
         assert result["findings"] == []
+        assert result["schema_version"] == "1.0"
+
+    def test_findings_have_normalized_fields(self):
+        result = analyze_url("paypa1.com", run_intel=False)
+        assert result["findings"]
+        for finding in result["findings"]:
+            assert finding["id"] == finding["check"]
+            assert finding["message"] == finding["finding"]
+            assert isinstance(finding["evidence"], dict)
+            assert finding["recommended_action"]
 
     @pytest.mark.parametrize("url", [
         "https://",
@@ -400,9 +434,11 @@ class TestAnalyzeUrl:
         assert "[ERROR] Input rejected:" in captured.err
         assert "Traceback" not in captured.err
 
+    @patch("phishguard.url_analyzer.socket.getaddrinfo")
     @patch("phishguard.url_analyzer.socket.create_connection")
     @patch("phishguard.url_analyzer.requests.get")
-    def test_young_domain_with_short_registration_period_is_flagged(self, mock_get, mock_connect):
+    def test_young_domain_with_short_registration_period_is_flagged(self, mock_get, mock_connect, mock_getaddrinfo):
+        mock_getaddrinfo.return_value = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
         from datetime import datetime, timedelta, timezone
         mock_connect.side_effect = socket.timeout("TLS intentionally skipped in this RDAP test")
         created = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
@@ -423,9 +459,11 @@ class TestAnalyzeUrl:
         assert "young_domain" in checks
         assert "short_registration_period" in checks
 
+    @patch("phishguard.url_analyzer.socket.getaddrinfo")
     @patch("phishguard.url_analyzer.socket.create_connection")
     @patch("phishguard.url_analyzer.requests.get")
-    def test_stacked_findings_reach_critical_tier(self, mock_rdap, mock_connect):
+    def test_stacked_findings_reach_critical_tier(self, mock_rdap, mock_connect, mock_getaddrinfo):
+        mock_getaddrinfo.return_value = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
         # CRITICAL (150+) requires stacking multiple independent signals —
         # structure red flags, a brand combosquat, AND a corroborating RDAP
         # signal, not just one bad check. Mocks both network calls (RDAP +

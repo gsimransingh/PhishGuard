@@ -309,12 +309,26 @@ def test_every_structured_finding_is_explainable():
 
     assert report["findings"]
     for finding in report["findings"]:
+        assert finding["check"] == finding["id"]
         assert finding["id"]
         assert finding["message"]
         assert finding["confidence"] in ("low", "medium", "high")
         assert isinstance(finding["evidence"], dict)
         assert finding["false_positive_note"]
         assert finding["recommended_action"]
+
+    assert report["schema_version"] == "1.0"
+    assert report["authentication_evidence"]["source_context"] == "unknown_capture"
+
+
+def test_authentication_source_context_is_explicitly_preserved():
+    report = analyze(
+        _minimal_parsed(authentication_results=["mx.example; spf=pass"]),
+        "test.eml",
+        run_intel=False,
+        auth_source="trusted_gateway",
+    )
+    assert report["authentication_evidence"]["source_context"] == "trusted_gateway"
 
 
 class TestSuspiciousUrlScoring:

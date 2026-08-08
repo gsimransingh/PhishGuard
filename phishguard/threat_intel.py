@@ -75,7 +75,11 @@ def check_ips(ip_list: list[str], api_key: Optional[str] = None) -> list[dict]:
 # Set your key as environment variable: VIRUSTOTAL_API_KEY
 # ---------------------------------------------------------------------------
 
-def check_url_virustotal(url: str, api_key: Optional[str] = None) -> dict:
+def check_url_virustotal(
+    url: str,
+    api_key: Optional[str] = None,
+    submit_unknown: bool = False,
+) -> dict:
     """
     Submit a URL to VirusTotal for reputation analysis.
     Returns detection stats (malicious, suspicious, clean engine counts).
@@ -94,7 +98,7 @@ def check_url_virustotal(url: str, api_key: Optional[str] = None) -> dict:
             headers=headers,
             timeout=15
         )
-        if resp.status_code == 404:
+        if resp.status_code == 404 and submit_unknown:
             submit = requests.post(
                 VIRUSTOTAL_URL_SCAN,
                 headers=headers,
@@ -112,6 +116,17 @@ def check_url_virustotal(url: str, api_key: Optional[str] = None) -> dict:
                 "undetected": 0,
                 "error":      None,
             }
+        if resp.status_code == 404:
+            return {
+                "source": "VirusTotal",
+                "url": url,
+                "status": "not_found",
+                "malicious": 0,
+                "suspicious": 0,
+                "harmless": 0,
+                "undetected": 0,
+                "error": None,
+            }
         resp.raise_for_status()
         stats = resp.json().get("data", {}).get("attributes", {}).get("last_analysis_stats", {})
         return {
@@ -128,7 +143,11 @@ def check_url_virustotal(url: str, api_key: Optional[str] = None) -> dict:
         return _stub_result("virustotal", url, str(e))
 
 
-def check_urls(url_list: list[str], api_key: Optional[str] = None) -> list[dict]:
+def check_urls(
+    url_list: list[str],
+    api_key: Optional[str] = None,
+    submit_unknown: bool = False,
+) -> list[dict]:
     """
     Run VirusTotal checks on a list of URLs.
     Adds a 15-second delay between requests to respect free tier rate limits.
@@ -136,7 +155,7 @@ def check_urls(url_list: list[str], api_key: Optional[str] = None) -> list[dict]
     results = []
     key = api_key or os.environ.get("VIRUSTOTAL_API_KEY", "")
     for index, url in enumerate(url_list):
-        results.append(check_url_virustotal(url, key))
+        results.append(check_url_virustotal(url, key, submit_unknown=submit_unknown))
         if key and index < len(url_list) - 1:
             time.sleep(15)
     return results

@@ -75,6 +75,12 @@ phishguard -u paypa1-verify.com
 
 # Explicitly permit external enrichment when appropriate
 phishguard -f samples/phishing_test.eml --enrich
+
+# Opt in to submitting VirusTotal-unknown URLs for scanning
+phishguard -f samples/phishing_test.eml --enrich --submit-unknown-urls
+
+# Record where Authentication-Results headers came from
+phishguard -f samples/phishing_test.eml --auth-source trusted_gateway
 ```
 
 ## Terminal colors
@@ -98,8 +104,8 @@ Analysis is offline by default: it does not contact any external service unless
 you explicitly pass `--enrich`.
 
 - With `--enrich`, email analysis can perform DNS SPF and DMARC lookups.
-- With API keys configured, enrichment can send up to ten extracted IPs to AbuseIPDB and up to three URLs to VirusTotal.
-- With `--enrich`, standalone URL analysis can perform an RDAP lookup and a TLS connection to the target host.
+- With API keys configured, enrichment can look up up to ten extracted IPs in AbuseIPDB and up to three URLs in VirusTotal. Unknown VirusTotal URLs are lookup-only unless `--submit-unknown-urls` is also supplied.
+- With `--enrich`, standalone URL analysis can perform an RDAP lookup and a TLS connection to the target host. Hostnames are resolved once and TLS enrichment is blocked if any result is non-public.
 - Batch enrichment is limited to ten files to contain third-party requests and rate-limit exposure.
 
 PhishGuard does **not** execute attachments or fetch webpage content. Analysts should still use approved sandboxing and investigation procedures for malicious URLs and files.
@@ -168,10 +174,10 @@ Scores are decision-support signals, not proof that a message is malicious. A va
 
 - HTML is parsed only for anchor evidence; PhishGuard does not render HTML, fetch images, execute scripts, or interpret CSS-generated content.
 - DKIM signature presence is detected, but PhishGuard does not independently perform full DKIM cryptographic verification.
-- Authentication-Results headers are reported as message evidence, but their trustworthiness depends on where the message was obtained and which mail system added them.
+- Authentication-Results headers are reported as message evidence, with an explicit `source_context`; their trustworthiness depends on where the message was obtained and which mail system added them. Use `--auth-source` to record that context.
 - DNS records show what a sender domain publishes; they do not independently prove a message passed authentication during delivery.
 - Standalone URL findings are not yet integrated into email URL scoring.
-- Registrable-domain extraction is currently a simple last-two-label approach and can be inaccurate for domains such as `example.co.uk`.
+- Registrable-domain extraction uses a bundled public-suffix snapshot; update the dependency periodically as the suffix list evolves.
 - Threat-intelligence coverage depends on API availability, rate limits, and configured keys.
 - Reports should be reviewed before being shared externally.
 
@@ -206,17 +212,17 @@ Scores are decision-support signals, not proof that a message is malicious. A va
 
 ### 0.5 — Unified URL and email analysis
 
-- [ ] Use public-suffix-aware domain parsing
+- [x] Use public-suffix-aware domain parsing
 - [ ] Integrate URL structure and brand-impersonation findings into email triage
-- [ ] Create one shared finding and scoring model
+- [x] Normalize URL and email findings around common IDs, messages, evidence, and actions
 - [ ] Prevent duplicate findings and inflated scores
 - [x] Define safe limits for network enrichment during batch analysis
 
 ### 0.6 — Analyst workflow improvements
 
 - [ ] Improve batch prioritization and analyst summaries
-- [ ] Stabilize JSON and CEF schemas for downstream systems
-- [ ] Add clear recommended next steps to reports
+- [ ] Stabilize JSON and CEF schemas for downstream systems (JSON schema version `1.0` is now declared)
+- [x] Add clear recommended next steps to reports
 - [ ] Measure false positives and triage-time reduction with real test cases
 
 ### Deferred
