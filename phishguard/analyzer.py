@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 from phishguard.threat_intel import check_ips, check_urls
 from phishguard.dns_validator import validate_spf_dns, validate_dmarc_dns
 from phishguard.url_analyzer import registrable_domain
+from phishguard.triage import disposition_for_findings
 from phishguard import __version__
 from phishguard.security import MAX_IP_ENRICHMENTS, MAX_URL_ENRICHMENTS
 
@@ -273,6 +274,7 @@ def analyze(
         "analyzed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "file":        os.path.basename(file_path),
         "risk_level":  risk_level,
+        "disposition": disposition_for_findings(risk_level, findings),
         "risk_score":  score,
         "flags":       flags,
         "findings":    findings,

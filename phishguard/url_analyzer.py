@@ -60,6 +60,7 @@ from urllib.parse import urlparse
 
 import requests
 import tldextract
+from phishguard.triage import disposition_for_findings
 
 _DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 _BRANDS_PATH = os.path.join(_DATA_DIR, "known_brands.json")
@@ -716,6 +717,7 @@ def analyze_url(url: str, run_intel: bool = False) -> dict:
         "hostname": hostname,
         "risk_score": score,
         "risk_level": risk_level,
+        "disposition": disposition_for_findings(risk_level, normalized_findings),
         "findings": normalized_findings,
         "domain_registration": domain_registration,
         "ssl_certificate": ssl_result,

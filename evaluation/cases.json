@@ -1,0 +1,51 @@
+[
+  {
+    "id": "legitimate_email",
+    "path": "samples/legitimate_email.eml",
+    "category": "benign",
+    "expected_disposition": "likely_benign",
+    "auth_source": "unknown_capture"
+  },
+  {
+    "id": "html_legitimate_email",
+    "path": "samples/html_legitimate.eml",
+    "category": "benign",
+    "expected_disposition": "likely_benign",
+    "auth_source": "unknown_capture"
+  },
+  {
+    "id": "phishing_test",
+    "path": "samples/phishing_test.eml",
+    "category": "credential_phishing",
+    "expected_disposition": "suspicious_escalate",
+    "auth_source": "trusted_gateway"
+  },
+  {
+    "id": "phishing_amazon",
+    "path": "samples/phishing_amazon.eml",
+    "category": "credential_phishing",
+    "expected_disposition": "suspicious_escalate",
+    "auth_source": "trusted_gateway"
+  },
+  {
+    "id": "html_phishing",
+    "path": "samples/html_phishing.eml",
+    "category": "credential_phishing",
+    "expected_disposition": "malicious_escalate",
+    "auth_source": "trusted_gateway"
+  },
+  {
+    "id": "suspicious_attachment",
+    "path": "samples/suspicious_attachment.eml",
+    "category": "malware_delivery",
+    "expected_disposition": "suspicious_escalate",
+    "auth_source": "trusted_gateway"
+  },
+  {
+    "id": "suspicious_email",
+    "path": "samples/suspicious_email.eml",
+    "category": "suspicious_business_email",
+    "expected_disposition": "suspicious_escalate",
+    "auth_source": "trusted_gateway"
+  }
+]

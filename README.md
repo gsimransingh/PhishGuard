@@ -170,6 +170,14 @@ only from environment variables and are never written to reports.
 
 Scores are decision-support signals, not proof that a message is malicious. A valid TLS certificate, a clean reputation result, or the absence of flags must not be treated as proof that content is safe.
 
+The report also includes an L1 disposition. `HIGH` means escalate for review; it
+does not automatically mean malicious. `malicious_escalate` is reserved for a
+`CRITICAL` score or a direct artifact signal such as a confirmed malicious URL,
+a displayed-link mismatch, or a risky attachment/type mismatch. Other MEDIUM
+and HIGH results use `suspicious_escalate`, while LOW results use
+`likely_benign`. This keeps triage cautious until the evidence is strong enough
+to support a malicious classification.
+
 ## Known limitations
 
 - HTML is parsed only for anchor evidence; PhishGuard does not render HTML, fetch images, execute scripts, or interpret CSS-generated content.
