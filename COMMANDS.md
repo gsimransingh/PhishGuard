@@ -73,7 +73,9 @@ configured API keys, contact AbuseIPDB or VirusTotal. VirusTotal results are
 lookup-only by default; add `--submit-unknown-urls` when you explicitly approve
 submitting URLs that VirusTotal has not seen before. Use `--auth-source`
 (`unknown_capture`, `trusted_gateway`, or `untrusted_capture`) to preserve the
-provenance of Authentication-Results headers in JSON reports.
+provenance of Authentication-Results headers in JSON reports. Authentication
+results affect scoring only for `trusted_gateway`; the other values preserve
+the evidence but do not trust it for scoring.
 
 ```powershell
 $env:ABUSEIPDB_API_KEY="your_key_here"

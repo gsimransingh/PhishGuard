@@ -174,12 +174,15 @@ Scores are decision-support signals, not proof that a message is malicious. A va
 
 - HTML is parsed only for anchor evidence; PhishGuard does not render HTML, fetch images, execute scripts, or interpret CSS-generated content.
 - DKIM signature presence is detected, but PhishGuard does not independently perform full DKIM cryptographic verification.
-- Authentication-Results headers are reported as message evidence, with an explicit `source_context`; their trustworthiness depends on where the message was obtained and which mail system added them. Use `--auth-source` to record that context.
+- Authentication-Results headers are reported as message evidence, with an explicit `source_context`. They affect scoring only when `--auth-source trusted_gateway` is supplied; `unknown_capture` and `untrusted_capture` preserve the evidence without trusting attacker-controlled authentication claims.
 - DNS records show what a sender domain publishes; they do not independently prove a message passed authentication during delivery.
 - Standalone URL findings are not yet integrated into email URL scoring.
 - Registrable-domain extraction uses a bundled public-suffix snapshot; update the dependency periodically as the suffix list evolves.
 - Threat-intelligence coverage depends on API availability, rate limits, and configured keys.
 - Reports should be reviewed before being shared externally.
+- Repeated instances of the same detection rule remain visible as separate
+  evidence, but only the first instance contributes to the risk score so
+  duplicated indicators cannot inflate severity.
 
 ## Triage-first roadmap
 
@@ -215,7 +218,7 @@ Scores are decision-support signals, not proof that a message is malicious. A va
 - [x] Use public-suffix-aware domain parsing
 - [ ] Integrate URL structure and brand-impersonation findings into email triage
 - [x] Normalize URL and email findings around common IDs, messages, evidence, and actions
-- [ ] Prevent duplicate findings and inflated scores
+- [x] Prevent duplicate findings and inflated scores
 - [x] Define safe limits for network enrichment during batch analysis
 
 ### 0.6 — Analyst workflow improvements

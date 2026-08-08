@@ -30,7 +30,7 @@ from phishguard import cli
 from phishguard.url_analyzer import (
     InvalidURLError,
     _levenshtein,
-    _registrable_domain,
+    registrable_domain,
     analyze_url,
     check_domain_registration,
     check_punycode_homograph,
@@ -71,19 +71,19 @@ class TestLevenshtein:
 
 
 # ---------------------------------------------------------------------------
-# _registrable_domain() — public-suffix-aware parsing
+# registrable_domain() — public-suffix-aware parsing
 # ---------------------------------------------------------------------------
 
 class TestRegistrableDomain:
     def test_simple_two_label_domain(self):
-        assert _registrable_domain("paypal.com") == "paypal.com"
+        assert registrable_domain("paypal.com") == "paypal.com"
 
     def test_subdomain_reduces_to_registrable_domain(self):
-        assert _registrable_domain("login.paypal.com") == "paypal.com"
+        assert registrable_domain("login.paypal.com") == "paypal.com"
 
     def test_multipart_public_suffix_is_parsed_correctly(self):
-        assert _registrable_domain("example.co.uk") == "example.co.uk"
-        assert _registrable_domain("login.example.co.uk") == "example.co.uk"
+        assert registrable_domain("example.co.uk") == "example.co.uk"
+        assert registrable_domain("login.example.co.uk") == "example.co.uk"
 
 
 # ---------------------------------------------------------------------------
@@ -400,6 +400,16 @@ class TestAnalyzeUrl:
             assert finding["message"] == finding["finding"]
             assert isinstance(finding["evidence"], dict)
             assert finding["recommended_action"]
+
+    @patch("phishguard.url_analyzer.check_ssl_certificate")
+    @patch("phishguard.url_analyzer.check_domain_registration")
+    def test_tls_enrichment_uses_explicit_url_port(self, mock_rdap, mock_tls):
+        mock_rdap.return_value = {"status": "not_found", "domain_status": []}
+        mock_tls.return_value = {"status": "unavailable", "error": "test"}
+
+        analyze_url("https://example.com:8443/login", run_intel=True)
+
+        mock_tls.assert_called_once_with("example.com", 8443)
 
     @pytest.mark.parametrize("url", [
         "https://",

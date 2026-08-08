@@ -152,7 +152,7 @@ def _levenshtein(a: str, b: str) -> int:
     return prev[-1]
 
 
-def _registrable_domain(hostname: str) -> str:
+def registrable_domain(hostname: str) -> str:
     """Return the registrable domain using the bundled public suffix snapshot."""
     extracted = _PUBLIC_SUFFIX_EXTRACT(hostname)
     if extracted.domain and extracted.suffix:
@@ -324,7 +324,7 @@ def check_typosquatting(hostname: str, brands: Optional[list] = None) -> list:
         brands = _load_known_brands()
 
     findings = []
-    registrable = _registrable_domain(hostname)
+    registrable = registrable_domain(hostname)
     main_label = registrable.split(".")[0].lower() if registrable else ""
 
     for brand in brands:
@@ -405,7 +405,7 @@ def check_domain_registration(hostname: str, timeout: int = 8) -> dict:
     TLD/registry, so "no data" is common and must NOT be treated as
     suspicious on its own.
     """
-    registrable = _registrable_domain(hostname)
+    registrable = registrable_domain(hostname)
     try:
         resp = requests.get(RDAP_URL.format(domain=registrable), timeout=timeout)
         if resp.status_code != 200:
@@ -610,7 +610,7 @@ def analyze_url(url: str, run_intel: bool = False) -> dict:
         dict with risk_score, risk_level, every finding (each independently
         explainable), plus registration and TLS results when run_intel is True.
     """
-    url, _, hostname, _ = _parse_url_input(url)
+    url, _, hostname, port = _parse_url_input(url)
 
     findings = []
     findings += check_url_structure(url)
@@ -656,7 +656,7 @@ def analyze_url(url: str, run_intel: bool = False) -> dict:
 
     ssl_result = None
     if run_intel and hostname:
-        ssl_result = check_ssl_certificate(hostname)
+        ssl_result = check_ssl_certificate(hostname, port or 443)
 
         if ssl_result["status"] == "verification_failed":
             findings.append({
@@ -676,7 +676,27 @@ def analyze_url(url: str, run_intel: bool = False) -> dict:
                 "false_positive_note": "New legitimate sites and routine 90-day cert renewals also produce fresh certificates; only meaningful alongside a newly-registered domain, not alone.",
             })
 
-    score = sum(f["weight"] for f in findings)
+    finding_counts: dict[str, int] = {}
+    normalized_findings = []
+    score = 0
+    for finding in findings:
+        rule_id = finding["check"]
+        finding_counts[rule_id] = finding_counts.get(rule_id, 0) + 1
+        occurrence = finding_counts[rule_id]
+        score_contribution = finding["weight"] if occurrence == 1 else 0
+        score += score_contribution
+        normalized_findings.append({
+            **finding,
+            "id": rule_id if occurrence == 1 else f"{rule_id}#{occurrence}",
+            "score_contribution": score_contribution,
+            "evidence_count": occurrence,
+            "message": finding.get("message", finding["finding"]),
+            "evidence": finding.get("evidence", {"check": rule_id}),
+            "recommended_action": finding.get(
+                "recommended_action", "Review the evidence and validate independently."
+            ),
+        })
+
     # Same 150 threshold and reasoning as analyzer.py — kept consistent
     # across both engines so "CRITICAL" means the same thing everywhere
     # in the tool, rather than each module inventing its own scale.
@@ -696,18 +716,7 @@ def analyze_url(url: str, run_intel: bool = False) -> dict:
         "hostname": hostname,
         "risk_score": score,
         "risk_level": risk_level,
-        "findings": [
-            {
-                **finding,
-                "id": finding.get("id", finding["check"]),
-                "message": finding.get("message", finding["finding"]),
-                "evidence": finding.get("evidence", {"check": finding["check"]}),
-                "recommended_action": finding.get(
-                    "recommended_action", "Review the evidence and validate independently."
-                ),
-            }
-            for finding in findings
-        ],
+        "findings": normalized_findings,
         "domain_registration": domain_registration,
         "ssl_certificate": ssl_result,
     }

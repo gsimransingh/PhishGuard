@@ -157,10 +157,12 @@ def print_text_report(report: dict, out=sys.stdout, color: bool = False) -> str:
         lines.append("  Finding Details:") # type: ignore
         for finding in report["findings"]: # type: ignore
             lines.append(
-                "    - {message} [confidence: {confidence}, weight: {weight}]".format(
+                "    - {message} [confidence: {confidence}, weight: {weight}, score contribution: {score_contribution}, evidence count: {evidence_count}]".format(
                     message=_safe_terminal_text(finding.get("message", "")),
                     confidence=_safe_terminal_text(finding.get("confidence", "unknown")),
                     weight=_safe_terminal_text(finding.get("weight", 0)),
+                    score_contribution=_safe_terminal_text(finding.get("score_contribution", finding.get("weight", 0))),
+                    evidence_count=_safe_terminal_text(finding.get("evidence_count", 1)),
                 )
             )
             lines.append(

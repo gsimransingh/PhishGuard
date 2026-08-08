@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 
 from phishguard.threat_intel import check_ips, check_urls
 from phishguard.dns_validator import validate_spf_dns, validate_dmarc_dns
+from phishguard.url_analyzer import registrable_domain
 from phishguard import __version__
 from phishguard.security import MAX_IP_ENRICHMENTS, MAX_URL_ENRICHMENTS
 
@@ -40,6 +41,7 @@ def analyze(
     findings: list[dict] = []
     flags: list[str] = []
     score: int = 0
+    finding_counts: dict[str, int] = {}
 
     def add_finding(
         finding_id: str,
@@ -51,24 +53,31 @@ def analyze(
         recommended_action: str,
     ) -> None:
         nonlocal score
+        finding_counts[finding_id] = finding_counts.get(finding_id, 0) + 1
+        occurrence = finding_counts[finding_id]
+        instance_id = finding_id if occurrence == 1 else f"{finding_id}#{occurrence}"
+        score_contribution = weight if occurrence == 1 else 0
         findings.append({
-            "id": finding_id,
+            "id": instance_id,
             "check": finding_id,
             "message": message,
             "weight": weight,
+            "score_contribution": score_contribution,
+            "evidence_count": occurrence,
             "confidence": confidence,
             "evidence": evidence,
             "false_positive_note": false_positive_note,
             "recommended_action": recommended_action,
         })
         flags.append(message)
-        score += weight
+        score += score_contribution
 
     # --- SPF / DKIM / DMARC interpretation ---
-    auth_evidence = _interpret_authentication(parsed)
-    spf_status = auth_evidence["spf"]["status"]
-    dkim_status = auth_evidence["dkim"]["status"]
-    dmarc_status = auth_evidence["dmarc"]["status"]
+    auth_trusted = auth_source == "trusted_gateway"
+    auth_evidence = _interpret_authentication(parsed, trusted=auth_trusted)
+    spf_status = auth_evidence["spf"]["score_status"]
+    dkim_status = auth_evidence["dkim"]["score_status"]
+    dmarc_status = auth_evidence["dmarc"]["score_status"]
 
     if spf_status in ("fail", "softfail", "permerror"):
         add_finding(
@@ -314,8 +323,8 @@ def _extract_email_address(header_value: str) -> str:
     return address.strip().lower()
 
 
-def _interpret_authentication(parsed: dict) -> dict:
-    """Interpret the closest recorded authentication results conservatively."""
+def _interpret_authentication(parsed: dict, trusted: bool = False) -> dict:
+    """Interpret authentication results and gate scoring on trusted provenance."""
     authentication_headers = parsed.get("authentication_results") or []
     closest_result = str(authentication_headers[0]) if authentication_headers else str(parsed.get("dmarc", ""))
 
@@ -347,25 +356,31 @@ def _interpret_authentication(parsed: dict) -> dict:
 
     dmarc_status, dmarc_source = result_for("dmarc")
 
+    def evidence(status: str, source: str, meaning: str) -> dict:
+        return {
+            "status": status,
+            "score_status": status if trusted else "untrusted",
+            "source": source,
+            "trusted": trusted,
+            "meaning": meaning,
+        }
+
     return {
-        "spf": {
-            "status": spf_status or "missing",
-            "source": spf_source,
-            "meaning": "Sender-policy evaluation recorded by the receiving system.",
-        },
-        "dkim": {
-            "status": dkim_status,
-            "source": dkim_source,
-            "meaning": (
+        "spf": evidence(
+            spf_status or "missing", spf_source,
+            "Sender-policy evaluation recorded by the receiving system.",
+        ),
+        "dkim": evidence(
+            dkim_status, dkim_source,
+            (
                 "present_unverified means a signature exists but PhishGuard did not "
                 "cryptographically verify it."
             ),
-        },
-        "dmarc": {
-            "status": dmarc_status or "missing",
-            "source": dmarc_source,
-            "meaning": "Domain-alignment evaluation recorded by the receiving system.",
-        },
+        ),
+        "dmarc": evidence(
+            dmarc_status or "missing", dmarc_source,
+            "Domain-alignment evaluation recorded by the receiving system.",
+        ),
         "caution": (
             "Authentication-Results is trusted only when added by the analyst's "
             "known receiving infrastructure; PhishGuard cannot establish that trust boundary."
@@ -388,8 +403,7 @@ def _normalized_comparison_domain(value: str) -> str:
         return ""
     if hostname.startswith("www."):
         hostname = hostname[4:]
-    labels = hostname.split(".")
-    return ".".join(labels[-2:]) if len(labels) >= 2 else hostname
+    return registrable_domain(hostname)
 
 
 def _find_display_destination_mismatches(html_links: list[dict]) -> list[dict]:

@@ -79,7 +79,7 @@ class TestCriticalRiskTier:
         # phishing_test.eml scores 115 from headers/URLs alone — high, but
         # not critical. Confirms the threshold isn't trivially reached.
         parsed = parse_eml(phishing_test_eml)
-        report = analyze(parsed, phishing_test_eml, run_intel=False)
+        report = analyze(parsed, phishing_test_eml, run_intel=False, auth_source="trusted_gateway")
         assert report["risk_level"] == "HIGH"
         assert report["risk_score"] < 150
 
@@ -99,7 +99,7 @@ class TestCriticalRiskTier:
                 "attachments": [{"filename": "invoice.exe", "content_type": "application/octet-stream", "size_bytes": 1024}],
             }
         )
-        report = analyze(parsed, "test.eml", run_intel=False)
+        report = analyze(parsed, "test.eml", run_intel=False, auth_source="trusted_gateway")
         assert report["risk_score"] >= 150
         assert report["risk_level"] == "CRITICAL"
 
@@ -112,7 +112,7 @@ class TestAnalyzeSampleEmails:
 
     def test_phishing_test_email_scores_high(self, phishing_test_eml):
         parsed = parse_eml(phishing_test_eml)
-        report = analyze(parsed, phishing_test_eml, run_intel=False)
+        report = analyze(parsed, phishing_test_eml, run_intel=False, auth_source="trusted_gateway")
         assert report["risk_level"] == "HIGH"
         assert "SPF check failed" in report["flags"]
         assert "DMARC check failed" in report["flags"]
@@ -120,7 +120,7 @@ class TestAnalyzeSampleEmails:
 
     def test_phishing_amazon_email_scores_high(self, phishing_amazon_eml):
         parsed = parse_eml(phishing_amazon_eml)
-        report = analyze(parsed, phishing_amazon_eml, run_intel=False)
+        report = analyze(parsed, phishing_amazon_eml, run_intel=False, auth_source="trusted_gateway")
         assert report["risk_level"] == "HIGH"
         assert any("Reply-To mismatch" in f for f in report["flags"])
 
@@ -132,7 +132,7 @@ class TestAnalyzeSampleEmails:
         # NOT assert an exact score, since that's the number under review,
         # not a settled contract.
         parsed = parse_eml(suspicious_eml)
-        report = analyze(parsed, suspicious_eml, run_intel=False)
+        report = analyze(parsed, suspicious_eml, run_intel=False, auth_source="trusted_gateway")
         assert any("SPF" in f for f in report["flags"])
         assert any("DMARC" in f for f in report["flags"])
 
@@ -153,8 +153,8 @@ class TestAnalyzeSampleEmails:
         )
         assert mismatch["confidence"] == "high"
         assert mismatch["evidence"]["displayed_domain"] == "paypal.com"
-        assert mismatch["evidence"]["destination_domain"] == "evil.example"
-        assert report["risk_level"] in ("HIGH", "CRITICAL")
+        assert mismatch["evidence"]["destination_domain"] == "paypal-login.evil.example"
+        assert report["risk_level"] in ("MEDIUM", "HIGH", "CRITICAL")
 
     def test_executable_mime_disguised_as_pdf_is_flagged(self, suspicious_attachment_eml):
         parsed = parse_eml(suspicious_attachment_eml)
@@ -192,7 +192,7 @@ class TestReplyToMismatch:
         parsed = _minimal_parsed(
             **{"from": "GitHub <noreply@github.com>", "reply_to": "noreply@github.com"}
         )
-        report = analyze(parsed, "test.eml", run_intel=False)
+        report = analyze(parsed, "test.eml", run_intel=False, auth_source="trusted_gateway")
         assert not any("Reply-To mismatch" in f for f in report["flags"])
 
     def test_genuinely_different_address_is_flagged(self):
@@ -200,7 +200,7 @@ class TestReplyToMismatch:
             "from": "PayPal <billing@paypal.com>",
             "reply_to": "collect-funds@evil-domain.ru",
         })
-        report = analyze(parsed, "test.eml", run_intel=False)
+        report = analyze(parsed, "test.eml", run_intel=False, auth_source="trusted_gateway")
         assert any("Reply-To mismatch" in f for f in report["flags"])
 
     def test_no_reply_to_header_at_all_is_not_flagged(self):
@@ -279,7 +279,7 @@ class TestAuthenticationInterpretation:
                 "mx.example; spf=pass; dkim=fail header.d=example.com; dmarc=pass"
             ],
         )
-        report = analyze(parsed, "test.eml", run_intel=False)
+        report = analyze(parsed, "test.eml", run_intel=False, auth_source="trusted_gateway")
 
         assert report["authentication_evidence"]["dkim"]["status"] == "fail"
         assert "DKIM verification failed" in report["flags"]
@@ -329,6 +329,48 @@ def test_authentication_source_context_is_explicitly_preserved():
         auth_source="trusted_gateway",
     )
     assert report["authentication_evidence"]["source_context"] == "trusted_gateway"
+
+
+def test_untrusted_authentication_results_are_reported_but_not_scored():
+    parsed = _minimal_parsed(
+        authentication_results=["attacker.example; spf=fail; dkim=fail; dmarc=fail"]
+    )
+    report = analyze(parsed, "test.eml", run_intel=False, auth_source="unknown_capture")
+
+    assert report["risk_score"] == 0
+    assert report["flags"] == []
+    assert report["authentication_evidence"]["spf"]["status"] == "fail"
+    assert report["authentication_evidence"]["spf"]["score_status"] == "untrusted"
+
+
+def test_repeated_findings_have_unique_instance_ids():
+    parsed = _minimal_parsed(
+        attachments=[
+            {"filename": "first.exe", "content_type": "application/octet-stream", "size_bytes": 1},
+            {"filename": "second.exe", "content_type": "application/octet-stream", "size_bytes": 1},
+        ]
+    )
+    report = analyze(parsed, "test.eml", run_intel=False)
+    findings = [f for f in report["findings"] if f["check"] == "risky_attachment_extension"]
+
+    assert [finding["id"] for finding in findings] == [
+        "risky_attachment_extension", "risky_attachment_extension#2"
+    ]
+    assert [finding["score_contribution"] for finding in findings] == [40, 0]
+    assert [finding["evidence_count"] for finding in findings] == [1, 2]
+    assert report["risk_score"] == 40
+
+
+def test_default_cli_preserves_untrusted_auth_without_scoring_it(tmp_path, phishing_test_eml):
+    output_path = tmp_path / "report.json"
+    result = subprocess.run(
+        [sys.executable, "main.py", "-f", phishing_test_eml, "-n", "-o", "json", "--no-banner", "-O", str(output_path)],
+        cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    report = json.loads(output_path.read_text(encoding="utf-8"))
+    assert report["authentication_evidence"]["source_context"] == "unknown_capture"
+    assert report["authentication_evidence"]["spf"]["score_status"] == "untrusted"
 
 
 class TestSuspiciousUrlScoring:

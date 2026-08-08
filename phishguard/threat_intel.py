@@ -37,20 +37,25 @@ def check_ip_abuseipdb(ip: str, api_key: Optional[str] = None) -> dict:
     try:
         resp = requests.get(ABUSEIPDB_URL, headers=headers, params=params, timeout=10)
         resp.raise_for_status()
-        data = resp.json().get("data", {})
+        payload = resp.json()
+        if not isinstance(payload, dict):
+            raise ValueError("AbuseIPDB response was not a JSON object")
+        data = payload.get("data", {})
+        if not isinstance(data, dict):
+            raise ValueError("AbuseIPDB response data was not an object")
         return {
             "source":                 "AbuseIPDB",
             "ip":                     ip,
-            "abuse_confidence_score": data.get("abuseConfidenceScore", 0),
+            "abuse_confidence_score": _as_nonnegative_int(data.get("abuseConfidenceScore", 0)),
             "country_code":           data.get("countryCode", ""),
             "isp":                    data.get("isp", ""),
             "domain":                 data.get("domain", ""),
-            "total_reports":          data.get("totalReports", 0),
+            "total_reports":          _as_nonnegative_int(data.get("totalReports", 0)),
             "last_reported":          data.get("lastReportedAt", ""),
             "is_tor":                 data.get("isTor", False),
             "error":                  None,
         }
-    except requests.RequestException as e:
+    except (requests.RequestException, ValueError, TypeError, AttributeError) as e:
         return _stub_result("abuseipdb", ip, str(e))
 
 
@@ -128,18 +133,25 @@ def check_url_virustotal(
                 "error": None,
             }
         resp.raise_for_status()
-        stats = resp.json().get("data", {}).get("attributes", {}).get("last_analysis_stats", {})
+        payload = resp.json()
+        if not isinstance(payload, dict):
+            raise ValueError("VirusTotal response was not a JSON object")
+        data = payload.get("data", {})
+        attributes = data.get("attributes", {}) if isinstance(data, dict) else {}
+        stats = attributes.get("last_analysis_stats", {}) if isinstance(attributes, dict) else {}
+        if not isinstance(stats, dict):
+            raise ValueError("VirusTotal analysis stats were not an object")
         return {
             "source":     "VirusTotal",
             "url":        url,
             "status":     "analysed",
-            "malicious":  stats.get("malicious", 0),
-            "suspicious": stats.get("suspicious", 0),
-            "harmless":   stats.get("harmless", 0),
-            "undetected": stats.get("undetected", 0),
+            "malicious":  _as_nonnegative_int(stats.get("malicious", 0)),
+            "suspicious": _as_nonnegative_int(stats.get("suspicious", 0)),
+            "harmless":   _as_nonnegative_int(stats.get("harmless", 0)),
+            "undetected": _as_nonnegative_int(stats.get("undetected", 0)),
             "error":      None,
         }
-    except requests.RequestException as e:
+    except (requests.RequestException, ValueError, TypeError, AttributeError) as e:
         return _stub_result("virustotal", url, str(e))
 
 
@@ -164,6 +176,13 @@ def check_urls(
 # ---------------------------------------------------------------------------
 # Helper
 # ---------------------------------------------------------------------------
+
+def _as_nonnegative_int(value: object) -> int:
+    """Normalize untrusted service counters before they reach scoring logic."""
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError, OverflowError):
+        return 0
 
 def _stub_result(source: str, indicator: str, error_msg: str) -> dict:
     """Return a stub result when no API key is available or a request fails."""
