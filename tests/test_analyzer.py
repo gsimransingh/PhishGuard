@@ -384,6 +384,22 @@ class TestSuspiciousUrlScoring:
         report = analyze(parsed, "test.eml", run_intel=False)
         assert not any("Suspicious URLs" in f for f in report["flags"])
 
+    def test_email_reuses_url_brand_impersonation_checks(self):
+        parsed = _minimal_parsed(urls=["https://paypa1.com/verify"])
+        report = analyze(parsed, "test.eml", run_intel=False)
+
+        assert report["url_analysis"]
+        assert any(finding["check"] == "typosquatting" for finding in report["findings"])
+
+    def test_report_contains_analyst_handoff_summary(self):
+        parsed = _minimal_parsed(
+            authentication_results=["mx.example; spf=fail; dkim=fail; dmarc=fail"]
+        )
+        report = analyze(parsed, "test.eml", run_intel=False, auth_source="trusted_gateway")
+
+        assert report["triage"]["priority"] == "P2"
+        assert report["triage"]["recommended_actions"]
+
 
 class TestDnsNotFoundScoring:
     def test_missing_spf_dns_record_is_flagged(self, monkeypatch):

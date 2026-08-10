@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 
 from phishguard.threat_intel import check_ips, check_urls
 from phishguard.dns_validator import validate_spf_dns, validate_dmarc_dns
-from phishguard.url_analyzer import registrable_domain
+from phishguard.url_analyzer import analyze_url, registrable_domain
 from phishguard.triage import disposition_for_findings
 from phishguard import __version__
 from phishguard.security import MAX_IP_ENRICHMENTS, MAX_URL_ENRICHMENTS
@@ -145,6 +145,7 @@ def analyze(
 
     # --- Suspicious URLs ---
     urls: list[str] = parsed.get("urls", [])
+    url_analysis: list[dict] = []
     suspicious_keywords = ["login", "verify", "secure", "account", "update", "confirm", "password", "bank"]
     sus_urls = [u for u in urls if any(kw in u.lower() for kw in suspicious_keywords)]
     if sus_urls:
@@ -156,6 +157,33 @@ def analyze(
             "Legitimate authentication and account-management pages often contain these words.",
             "Inspect destination domains and compare them with the claimed sender.",
         )
+
+    # Reuse the standalone URL engine for every URL found in an email.  Keep
+    # this structural/brand analysis offline even when email enrichment is
+    # enabled; reputation, DNS, and TLS checks remain in their existing
+    # explicit enrichment paths below.
+    for url in dict.fromkeys(urls):
+        try:
+            url_report = analyze_url(url, run_intel=False)
+        except ValueError:
+            url_analysis.append({"url": url, "error": "invalid_url"})
+            continue
+        url_analysis.append({
+            "url": url,
+            "hostname": url_report["hostname"],
+            "risk_level": url_report["risk_level"],
+            "findings": [finding["check"] for finding in url_report["findings"]],
+        })
+        for url_finding in url_report["findings"]:
+            add_finding(
+                url_finding["check"],
+                url_finding.get("message", url_finding.get("finding", "URL finding")),
+                url_finding.get("weight", 0),
+                url_finding.get("confidence", "low"),
+                {"url": url, **url_finding.get("evidence", {})},
+                url_finding.get("false_positive_note", "Validate this URL finding independently."),
+                url_finding.get("recommended_action", "Do not open the URL; validate the destination independently."),
+            )
 
     for mismatch in _find_display_destination_mismatches(parsed.get("html_links", [])):
         add_finding(
@@ -267,6 +295,7 @@ def analyze(
     else:
         risk_level = "LOW"
 
+    disposition = disposition_for_findings(risk_level, findings)
     return {
         "tool":        "PhishGuard",
         "schema_version": "1.0",
@@ -274,7 +303,8 @@ def analyze(
         "analyzed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "file":        os.path.basename(file_path),
         "risk_level":  risk_level,
-        "disposition": disposition_for_findings(risk_level, findings),
+        "disposition": disposition,
+        "triage": _build_triage_summary(disposition, findings),
         "risk_score":  score,
         "flags":       flags,
         "findings":    findings,
@@ -299,6 +329,7 @@ def analyze(
             "attachments": parsed["attachments"],
             "html_links":   parsed.get("html_links", []),
         },
+        "url_analysis": url_analysis,
         "threat_intel": {
             "ip_checks":  intel_ips,
             "url_checks": intel_urls,
@@ -311,6 +342,44 @@ def _extract_domain(from_header: str) -> str:
     """Extract domain from a From: header like 'Name <user@domain.com>'."""
     match = re.search(r'@([\w.-]+)', from_header)
     return match.group(1) if match else ""
+
+
+def _build_triage_summary(disposition: str, findings: list[dict]) -> dict:
+    """Build a compact, consistent handoff summary for an L1 analyst."""
+    priority = {
+        "malicious_escalate": "P1",
+        "suspicious_escalate": "P2",
+        "insufficient_evidence": "P3",
+        "likely_benign": "P4",
+    }[disposition]
+    confidence_order = {"low": 1, "medium": 2, "high": 3}
+    confidence = max(
+        (finding.get("confidence", "low") for finding in findings),
+        key=lambda value: confidence_order.get(value, 0),
+        default="low",
+    )
+    actions = list(dict.fromkeys(
+        finding.get("recommended_action", "Review the evidence.")
+        for finding in findings
+        if finding.get("recommended_action")
+    ))
+    reason = next(
+        (finding.get("message", "") for finding in sorted(
+            findings,
+            key=lambda finding: (
+                confidence_order.get(finding.get("confidence", "low"), 0),
+                finding.get("score_contribution", 0),
+            ),
+            reverse=True,
+        ) if finding.get("message")),
+        "No strong detection evidence was recorded.",
+    )
+    return {
+        "priority": priority,
+        "confidence": confidence,
+        "escalation_reason": reason,
+        "recommended_actions": actions[:5],
+    }
 
 
 def _extract_email_address(header_value: str) -> str:

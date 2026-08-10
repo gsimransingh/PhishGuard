@@ -131,6 +131,14 @@ def print_text_report(report: dict, out=sys.stdout, color: bool = False) -> str:
     lines.append(sep) # type: ignore
     risk_line = f"  Risk Level : {_safe_terminal_text(report['risk_level'])} (score: {_safe_terminal_text(report['risk_score'])})" # type: ignore
     lines.append(_colorize_risk(report["risk_level"], risk_line, color)) # type: ignore
+    triage = report.get("triage", {})
+    lines.append(f"  Disposition: {_safe_terminal_text(report.get('disposition', 'unknown'))}")
+    lines.append(f"  Priority   : {_safe_terminal_text(triage.get('priority', 'P3'))}")
+    lines.append(f"  Confidence : {_safe_terminal_text(triage.get('confidence', 'low'))}")
+    lines.append(f"  Why        : {_safe_terminal_text(triage.get('escalation_reason', 'No strong detection evidence was recorded.'))}")
+    if triage.get("recommended_actions"):
+        lines.append("  Next Steps :")
+        lines.extend(f"    - {_safe_terminal_text(action)}" for action in triage["recommended_actions"])
     lines.append(sep) # type: ignore
     lines.append("  Email Metadata:") # type: ignore
     for k, v in report["email_metadata"].items(): # type: ignore
@@ -276,7 +284,7 @@ def print_batch_summary(results: list[dict], out=sys.stdout, color: bool = False
     display_lines.append(lines[-1]) # type: ignore
     lines.append(sep) # type: ignore
     display_lines.append(sep) # type: ignore
-    lines.append(f"  {'File':<35} {'Risk':<8} {'Score':<8} {'Flags'}") # type: ignore
+    lines.append(f"  {'File':<35} {'Risk':<8} {'Priority':<8} {'Score':<8} {'Flags'}") # type: ignore
     display_lines.append(lines[-1]) # type: ignore
     lines.append("-" * 70) # type: ignore
     display_lines.append("-" * 70) # type: ignore
@@ -288,9 +296,10 @@ def print_batch_summary(results: list[dict], out=sys.stdout, color: bool = False
         else:
             fname = _safe_terminal_text(r['file'][:33] + '..' if len(r['file']) > 35 else r['file']) # type: ignore
             risk_cell = f"{r['risk_level']:<8}" # type: ignore
-            lines.append(f"  {fname:<35} {risk_cell} {str(r['risk_score']):<8} {len(r['flags'])} flag(s)") # type: ignore
+            priority = r.get("triage", {}).get("priority", "P3")
+            lines.append(f"  {fname:<35} {risk_cell} {priority:<8} {str(r['risk_score']):<8} {len(r['flags'])} flag(s)") # type: ignore
             display_risk = _colorize_risk(r["risk_level"], risk_cell, color) # type: ignore
-            display_lines.append(f"  {fname:<35} {display_risk} {str(r['risk_score']):<8} {len(r['flags'])} flag(s)") # type: ignore
+            display_lines.append(f"  {fname:<35} {display_risk} {priority:<8} {str(r['risk_score']):<8} {len(r['flags'])} flag(s)") # type: ignore
     lines.append(sep) # type: ignore
     display_lines.append(sep) # type: ignore
 
@@ -323,7 +332,7 @@ def _safe_csv_cell(value: object) -> str:
 
 def export_csv(results: list[dict], csv_path: str): # type: ignore
     """Export batch results to a CSV file."""
-    fieldnames = ["file", "risk_level", "risk_score", "flags", "urls", "ips", "analyzed_at", "error"]
+    fieldnames = ["file", "risk_level", "disposition", "priority", "confidence", "risk_score", "flags", "urls", "ips", "analyzed_at", "error"]
     with open(csv_path, 'w', newline='', encoding='utf-8') as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
@@ -331,13 +340,16 @@ def export_csv(results: list[dict], csv_path: str): # type: ignore
             if r.get("error"): # type: ignore
                 row = {
                     "file": r["file"], "risk_level": "ERROR",
-                    "risk_score": "", "flags": "", "urls": "",
+                    "disposition": "", "priority": "", "confidence": "", "risk_score": "", "flags": "", "urls": "",
                     "ips": "", "analyzed_at": "", "error": r["error"],
                 }
             else:
                 row = {
                     "file":        r["file"],
                     "risk_level":  r["risk_level"],
+                    "disposition": r.get("disposition", ""),
+                    "priority":    r.get("triage", {}).get("priority", "P3"),
+                    "confidence":  r.get("triage", {}).get("confidence", "low"),
                     "risk_score":  r["risk_score"],
                     "flags":       " | ".join(r["flags"]), # type: ignore
                     "urls":        " | ".join(r["iocs"]["urls"]), # type: ignore

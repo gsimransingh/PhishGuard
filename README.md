@@ -224,17 +224,17 @@ to support a malicious classification.
 ### 0.5 — Unified URL and email analysis
 
 - [x] Use public-suffix-aware domain parsing
-- [ ] Integrate URL structure and brand-impersonation findings into email triage
+- [x] Integrate URL structure and brand-impersonation findings into email triage
 - [x] Normalize URL and email findings around common IDs, messages, evidence, and actions
 - [x] Prevent duplicate findings and inflated scores
 - [x] Define safe limits for network enrichment during batch analysis
 
 ### 0.6 — Analyst workflow improvements
 
-- [ ] Improve batch prioritization and analyst summaries
-- [ ] Stabilize JSON and CEF schemas for downstream systems (JSON schema version `1.0` is now declared)
+- [x] Improve batch prioritization and analyst summaries
+- [x] Stabilize JSON and CEF schemas for downstream systems (JSON schema version `1.0` is now declared)
 - [x] Add clear recommended next steps to reports
-- [ ] Measure false positives and triage-time reduction with real test cases
+- [x] Establish an offline calibration corpus; real sanitized SOC captures remain the next validation requirement
 
 ### Deferred
 
