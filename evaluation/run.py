@@ -16,7 +16,7 @@ ESCALATING = {"suspicious_escalate", "malicious_escalate"}
 def evaluate_cases(repo_root: Path, cases: list[dict]) -> dict:
     results = []
     for case in cases:
-        required = {"id", "path", "category", "expected_disposition"}
+        required = {"id", "category", "expected_disposition"}
         missing = required - case.keys()
         if missing:
             raise ValueError(f"Evaluation case {case.get('id', '<unknown>')} is missing: {sorted(missing)}")
@@ -25,14 +25,21 @@ def evaluate_cases(repo_root: Path, cases: list[dict]) -> dict:
                 f"Evaluation case {case['id']} has invalid expected disposition: "
                 f"{case['expected_disposition']}"
             )
-        path = repo_root / case["path"]
-        if not path.is_file():
-            raise FileNotFoundError(f"Evaluation sample does not exist: {path}")
-        report = analyze(
-            parse_eml(str(path)),
-            str(path),
-            auth_source=case.get("auth_source", "unknown_capture"),
+        if "path" not in case and "parsed" not in case:
+            raise ValueError(f"Evaluation case {case['id']} needs either path or parsed data")
+        if "parsed" in case:
+            path = repo_root / case.get("path", f"evaluation/{case['id']}")
+            parsed = case["parsed"]
+        else:
+            path = repo_root / case["path"]
+            if not path.is_file():
+                raise FileNotFoundError(f"Evaluation sample does not exist: {path}")
+            parsed = parse_eml(str(path))
+        source_type = case.get(
+            "source_type",
+            "parsed_synthetic" if "parsed" in case else "checked_in_fixture",
         )
+        report = analyze(parsed, str(path), auth_source=case.get("auth_source", "unknown_capture"))
         results.append({
             "id": case["id"],
             "category": case["category"],
@@ -41,6 +48,7 @@ def evaluate_cases(repo_root: Path, cases: list[dict]) -> dict:
             "risk_level": report["risk_level"],
             "risk_score": report["risk_score"],
             "auth_source": case.get("auth_source", "unknown_capture"),
+            "source_type": source_type,
             "finding_checks": sorted({finding["check"] for finding in report["findings"]}),
             "correct": report["disposition"] == case["expected_disposition"],
         })
@@ -111,6 +119,7 @@ def evaluate_cases(repo_root: Path, cases: list[dict]) -> dict:
         "breakdowns": {
             "by_category": grouped_metrics("category"),
             "by_auth_source": grouped_metrics("auth_source"),
+            "by_source_type": grouped_metrics("source_type"),
             "finding_rule_case_counts": dict(sorted(rule_case_counts.items())),
         },
         "results": results,
@@ -121,10 +130,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", type=Path, default=Path(__file__).with_name("cases.json"))
     parser.add_argument("--output", type=Path, help="Write the JSON report to this path")
+    parser.add_argument(
+        "--include-synthetic",
+        action="store_true",
+        help="Include deterministic generated .eml calibration fixtures",
+    )
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parent.parent
     cases = json.loads(args.dataset.read_text(encoding="utf-8"))
+    if args.include_synthetic:
+        from evaluation.synthetic_cases import build_synthetic_cases
+        cases.extend(build_synthetic_cases())
     report = evaluate_cases(repo_root, cases)
     rendered = json.dumps(report, indent=2)
     if args.output:

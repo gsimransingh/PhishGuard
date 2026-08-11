@@ -1,0 +1,27 @@
+From: updates@example.com
+To: analyst@example.test
+Date: Mon, 10 Aug 2026 09:00:00 +0000
+Message-ID: <synthetic_attachment_01@example.com>
+Subject: Synthetic notification
+Received: from mx.example.com (203.0.113.10) by mx.example.test
+Received-SPF: fail (mx.example.com: synthetic test failure)
+DKIM-Signature: v=1; d=example.com; s=synthetic;
+Authentication-Results: mx.example.com; spf=fail; dkim=fail; dmarc=fail
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="synthetic-synthetic_attachment_01"
+
+--synthetic-synthetic_attachment_01
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Invoice attached for review.
+
+--synthetic-synthetic_attachment_01
+Content-Type: application/x-msdownload
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="invoice_1.pdf.exe"
+MIME-Version: 1.0
+
+c3ludGhldGljIGF0dGFjaG1lbnQgY29udGVudA==
+
+--synthetic-synthetic_attachment_01--

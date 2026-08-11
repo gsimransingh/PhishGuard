@@ -14,7 +14,7 @@ def _not_found_response():
 def test_unknown_url_is_lookup_only_by_default(mock_get, mock_post):
     mock_get.return_value = _not_found_response()
 
-    result = check_url_virustotal("https://unknown.example")
+    result = check_url_virustotal("https://unknown.example", api_key="test-key")
 
     assert result["status"] == "not_found"
     mock_post.assert_not_called()
@@ -26,7 +26,11 @@ def test_unknown_url_submission_requires_explicit_opt_in(mock_get, mock_post):
     mock_get.return_value = _not_found_response()
     mock_post.return_value = Mock(status_code=200, json=lambda: {"data": {"id": "analysis-1"}})
 
-    result = check_url_virustotal("https://unknown.example", submit_unknown=True)
+    result = check_url_virustotal(
+        "https://unknown.example",
+        api_key="test-key",
+        submit_unknown=True,
+    )
 
     assert result["status"] == "submitted_for_analysis"
     mock_post.assert_called_once()

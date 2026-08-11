@@ -26,7 +26,9 @@ Given an `.eml` file, PhishGuard can:
 - Interpret SPF, DKIM, and DMARC results while preserving the original authentication evidence
 - Look up SPF and DMARC DNS records
 - Flag Reply-To mismatches, displayed-link versus destination mismatches, suspicious URL keywords, deceptive filenames, risky extensions, and executable MIME mismatches
+- Reuse standalone URL structure and brand-impersonation checks during email triage
 - Explain each finding with its weight, confidence, evidence, false-positive caveat, and recommended next action
+- Assign an L1 disposition, priority, confidence, escalation reason, and recommended next steps
 - Check IPs with AbuseIPDB and URLs with VirusTotal when API keys are available
 - Produce text, JSON, HTML, CEF, batch-summary, and CSV output
 - Analyze a standalone URL or domain for structural tricks, typosquatting, RDAP registration signals, and TLS-certificate signals
@@ -178,13 +180,18 @@ and HIGH results use `suspicious_escalate`, while LOW results use
 `likely_benign`. This keeps triage cautious until the evidence is strong enough
 to support a malicious classification.
 
+URL words such as `login`, `verify`, or `password` remain visible as analyst
+evidence but are score-neutral by themselves. Stronger URL structure,
+brand-impersonation, authentication, attachment, or reputation findings must
+corroborate them before severity increases.
+
 ## Known limitations
 
 - HTML is parsed only for anchor evidence; PhishGuard does not render HTML, fetch images, execute scripts, or interpret CSS-generated content.
 - DKIM signature presence is detected, but PhishGuard does not independently perform full DKIM cryptographic verification.
 - Authentication-Results headers are reported as message evidence, with an explicit `source_context`. They affect scoring only when `--auth-source trusted_gateway` is supplied; `unknown_capture` and `untrusted_capture` preserve the evidence without trusting attacker-controlled authentication claims.
 - DNS records show what a sender domain publishes; they do not independently prove a message passed authentication during delivery.
-- Standalone URL findings are not yet integrated into email URL scoring.
+- URL structure and brand-impersonation findings are integrated into email URL scoring; RDAP and TLS checks remain explicit-enrichment-only.
 - Registrable-domain extraction uses a bundled public-suffix snapshot; update the dependency periodically as the suffix list evolves.
 - Threat-intelligence coverage depends on API availability, rate limits, and configured keys.
 - Reports should be reviewed before being shared externally.
@@ -224,17 +231,17 @@ to support a malicious classification.
 ### 0.5 — Unified URL and email analysis
 
 - [x] Use public-suffix-aware domain parsing
-- [ ] Integrate URL structure and brand-impersonation findings into email triage
+- [x] Integrate URL structure and brand-impersonation findings into email triage
 - [x] Normalize URL and email findings around common IDs, messages, evidence, and actions
 - [x] Prevent duplicate findings and inflated scores
 - [x] Define safe limits for network enrichment during batch analysis
 
 ### 0.6 — Analyst workflow improvements
 
-- [ ] Improve batch prioritization and analyst summaries
-- [ ] Stabilize JSON and CEF schemas for downstream systems (JSON schema version `1.0` is now declared)
+- [x] Improve batch prioritization and analyst summaries
+- [x] Stabilize JSON and CEF schemas for downstream systems (JSON schema version `1.0` is now declared)
 - [x] Add clear recommended next steps to reports
-- [ ] Measure false positives and triage-time reduction with real test cases
+- [x] Establish an offline calibration corpus; real sanitized SOC captures remain the next validation requirement
 
 ### Deferred
 
@@ -253,16 +260,24 @@ PhishGuard/
 ├── main.py
 ├── pyproject.toml
 ├── SECURITY.md
+├── evaluation/
+│   ├── cases.json
+│   ├── generate_eml_corpus.py
+│   ├── run.py
+│   └── synthetic_cases.py
 ├── phishguard/
 │   ├── analyzer.py
 │   ├── cli.py
 │   ├── dns_validator.py
 │   ├── email_parser.py
 │   ├── report_generator.py
+│   ├── security.py
+│   ├── triage.py
 │   ├── threat_intel.py
 │   ├── url_analyzer.py
 │   └── data/
 ├── samples/
+│   └── generated/            # deterministic synthetic .eml regression fixtures
 └── tests/
 ```
 

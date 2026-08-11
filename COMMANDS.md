@@ -77,6 +77,13 @@ provenance of Authentication-Results headers in JSON reports. Authentication
 results affect scoring only for `trusted_gateway`; the other values preserve
 the evidence but do not trust it for scoring.
 
+Email reports include the SOC L1 disposition (`likely_benign`,
+`suspicious_escalate`, `malicious_escalate`, or `insufficient_evidence`), a
+priority (`P1`–`P4`), confidence, the main escalation reason, and recommended
+next steps. Email URLs also receive the offline structural and
+brand-impersonation checks used by standalone URL analysis; RDAP and TLS
+enrichment remain opt-in.
+
 ```powershell
 $env:ABUSEIPDB_API_KEY="your_key_here"
 $env:VIRUSTOTAL_API_KEY="your_key_here"
@@ -92,6 +99,20 @@ phishguard -f email.eml -o json > report.json
 ```
 
 Use `--no-banner` for scheduled jobs that do not need the startup banner.
+
+## Offline evaluation
+
+Run the seven checked-in email fixtures:
+
+```bash
+python -m evaluation.run
+```
+
+Include the optional deterministic generated `.eml` calibration fixtures explicitly:
+
+```bash
+python -m evaluation.run --include-synthetic
+```
 
 ## Terminal colors
 

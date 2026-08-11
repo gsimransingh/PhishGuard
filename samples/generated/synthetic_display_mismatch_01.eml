@@ -1,0 +1,28 @@
+From: updates@example.com
+To: analyst@example.test
+Date: Mon, 10 Aug 2026 09:00:00 +0000
+Message-ID: <synthetic_display_mismatch_01@example.com>
+Subject: Synthetic notification
+Received: from mx.example.com (203.0.113.10) by mx.example.test
+Received-SPF: fail (mx.example.com: synthetic test failure)
+DKIM-Signature: v=1; d=example.com; s=synthetic;
+Authentication-Results: mx.example.com; spf=fail; dkim=fail; dmarc=fail
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="synthetic-synthetic_display_mismatch_01"
+
+--synthetic-synthetic_display_mismatch_01
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Please review the account notice in your email client.
+
+--synthetic-synthetic_display_mismatch_01
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+<html><body><a href=3D"https://paypal-login.evil.example/verify">https://payp=
+al.com</a></body></html>
+
+--synthetic-synthetic_display_mismatch_01--

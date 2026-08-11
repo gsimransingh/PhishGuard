@@ -24,6 +24,10 @@ def generate_html_report(report: dict, output_path: str = None) -> str:
 
     metadata = report["email_metadata"]
     iocs = report["iocs"]
+    triage = report.get("triage", {})
+    actions_html = ''.join(
+        f'<li>{html_escape(action)}</li>' for action in triage.get("recommended_actions", [])
+    ) or '<li>Review the evidence and validate independently.</li>'
     flags_html = ''.join(
         f'<div class="flag">{html_escape(flag)}</div>' for flag in report["flags"]
     ) or '<p class="no-data">No flags raised.</p>'
@@ -187,6 +191,16 @@ def generate_html_report(report: dict, output_path: str = None) -> str:
 
         <div class="risk-banner">
             Risk Level: {html_escape(report['risk_level'])} (Score: {html_escape(report['risk_score'])})
+            | Disposition: {html_escape(report.get('disposition', 'unknown'))}
+            | Priority: {html_escape(triage.get('priority', 'P3'))}
+        </div>
+
+        <div class="section">
+            <h2>Analyst Handoff</h2>
+            <p><strong>Confidence:</strong> {html_escape(triage.get('confidence', 'low'))}</p>
+            <p><strong>Reason:</strong> {html_escape(triage.get('escalation_reason', 'No strong detection evidence was recorded.'))}</p>
+            <p><strong>Recommended next steps:</strong></p>
+            <ul>{actions_html}</ul>
         </div>
 
         <div class="section">
@@ -283,7 +297,10 @@ def generate_cef_log(report: dict) -> str:
     extensions.append(f"suser={sender}")
     extensions.append(f"msg={subject}")
     extensions.append(f"cs1Label=RiskScore cs1={report['risk_score']}")
-    extensions.append(f"cs2Label=Flags cs2={escape_cef('; '.join(report['flags'][:3]) if report['flags'] else 'None')}")
+    extensions.append(f"cs2Label=Disposition cs2={escape_cef(report.get('disposition', 'unknown'))}")
+    extensions.append(f"cs3Label=Priority cs3={escape_cef(report.get('triage', {}).get('priority', 'P3'))}")
+    extensions.append(f"cs4Label=Confidence cs4={escape_cef(report.get('triage', {}).get('confidence', 'low'))}")
+    extensions.append(f"cs5Label=Flags cs5={escape_cef('; '.join(report['flags'][:3]) if report['flags'] else 'None')}")
     extensions.append(f"cnt={len(report['flags'])}")
 
     if report['iocs']['urls']:
