@@ -108,7 +108,7 @@ Run the seven checked-in email fixtures:
 python -m evaluation.run
 ```
 
-Include the optional deterministic calibration variants explicitly:
+Include the optional deterministic generated `.eml` calibration fixtures explicitly:
 
 ```bash
 python -m evaluation.run --include-synthetic

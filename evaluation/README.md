@@ -13,7 +13,7 @@ Run the offline baseline from the repository root:
 python -m evaluation.run --output evaluation\baseline.json
 ```
 
-Add the deterministic parsed-message calibration variants explicitly when you
+Add the deterministic generated `.eml` calibration fixtures explicitly when you
 want the larger offline regression run:
 
 ```powershell
