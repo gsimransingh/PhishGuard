@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from evaluation.run import evaluate_cases
+from evaluation.synthetic_cases import build_synthetic_cases
 
 
 def test_evaluation_reports_metrics_and_confusion_matrix():
@@ -33,3 +34,12 @@ def test_evaluation_reports_metrics_and_confusion_matrix():
     assert report["confusion_matrix"]["suspicious_escalate"]["suspicious_escalate"] == 1
     assert report["breakdowns"]["by_auth_source"]["trusted_gateway"]["cases"] == 1
     assert "dmarc_failure" in report["breakdowns"]["finding_rule_case_counts"]
+
+
+def test_synthetic_corpus_is_backed_by_eml_files():
+    repo_root = Path(__file__).parent.parent
+    cases = build_synthetic_cases()
+
+    assert len(cases) == 27
+    assert all((repo_root / case["path"]).is_file() for case in cases)
+    assert all(case["path"].endswith(".eml") for case in cases)

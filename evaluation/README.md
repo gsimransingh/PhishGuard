@@ -30,9 +30,17 @@ escalation signal, while a malicious disposition requires CRITICAL severity or
 a direct malicious artifact signal.
 
 The default runner evaluates the seven checked-in email fixtures. The optional
-synthetic set adds 27 deterministic parsed-message variants. They are useful
-for calibration without storing personal mail, but they are not a substitute
-for 30–50 real sanitized SOC captures when making production accuracy claims.
+synthetic set adds 27 deterministic generated `.eml` fixtures, so the parser,
+MIME handling, HTML-link extraction, and attachment metadata paths are also
+exercised. They are useful for regression testing without storing personal
+mail, but they are not a substitute for 30–50 real sanitized SOC captures when
+making production accuracy claims.
+
+Regenerate the synthetic fixtures after changing their definitions:
+
+```powershell
+python -m evaluation.generate_eml_corpus
+```
 
 The bundled seven cases are a smoke baseline, not a production accuracy claim.
 Expand the manifest with sanitized organizational cases before using the

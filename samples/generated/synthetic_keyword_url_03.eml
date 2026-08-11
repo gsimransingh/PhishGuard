@@ -1,0 +1,14 @@
+From: updates@example.com
+To: analyst@example.test
+Date: Mon, 10 Aug 2026 09:00:00 +0000
+Message-ID: <synthetic_keyword_url_03@example.com>
+Subject: Synthetic notification
+Received: from mx.example.com (203.0.113.10) by mx.example.test
+Received-SPF: pass
+DKIM-Signature: v=1; d=example.com; s=synthetic;
+Authentication-Results: mx.example.com; spf=pass; dkim=pass; dmarc=pass
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+MIME-Version: 1.0
+
+Please review this notice: https://example.com/login/confirm

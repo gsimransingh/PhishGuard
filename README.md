@@ -271,6 +271,7 @@ PhishGuard/
 │   ├── url_analyzer.py
 │   └── data/
 ├── samples/
+│   └── generated/            # deterministic synthetic .eml regression fixtures
 └── tests/
 ```
 
