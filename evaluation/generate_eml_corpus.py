@@ -79,6 +79,62 @@ for index in range(1, 5):
         "filename": f"invoice_{index}.pdf.exe",
     })
 
+for index in range(1, 3):
+    SYNTHETIC_DEFINITIONS.append({
+        "id": f"synthetic_forwarded_{index:02d}",
+        "category": "benign_forwarded_mail",
+        "expected_disposition": "likely_benign",
+        "auth_source": "unknown_capture",
+        "kind": "forwarded",
+        "subject": f"Fwd: Team update {index}",
+    })
+
+SYNTHETIC_DEFINITIONS.extend([
+    {
+        "id": "synthetic_mailing_list_01",
+        "category": "benign_mailing_list",
+        "expected_disposition": "likely_benign",
+        "auth_source": "unknown_capture",
+        "kind": "mailing_list",
+        "subject": "Community digest",
+    },
+    {
+        "id": "synthetic_legitimate_password_reset_01",
+        "category": "benign_account_flow",
+        "expected_disposition": "likely_benign",
+        "auth_source": "unknown_capture",
+        "kind": "keyword_url",
+        "subject": "Password reset requested",
+        "url": "https://example.com/password/reset",
+    },
+    {
+        "id": "synthetic_marketing_link_01",
+        "category": "benign_marketing",
+        "expected_disposition": "likely_benign",
+        "auth_source": "unknown_capture",
+        "kind": "keyword_url",
+        "subject": "Monthly newsletter",
+        "url": "https://example.com/campaign/summer?utm_source=mail",
+    },
+    {
+        "id": "synthetic_missing_auth_01",
+        "category": "unknown_authentication",
+        "expected_disposition": "likely_benign",
+        "auth_source": "unknown_capture",
+        "kind": "missing_auth",
+        "subject": "Message without preserved auth results",
+    },
+    {
+        "id": "synthetic_safe_attachment_01",
+        "category": "benign_attachment",
+        "expected_disposition": "likely_benign",
+        "auth_source": "unknown_capture",
+        "kind": "safe_attachment",
+        "subject": "Invoice PDF",
+        "filename": "invoice.pdf",
+    },
+])
+
 
 def _common_message(case: dict) -> EmailMessage:
     message = EmailMessage()
@@ -89,7 +145,9 @@ def _common_message(case: dict) -> EmailMessage:
     message["Subject"] = case.get("subject", "Synthetic notification")
     message["Received"] = "from mx.example.com (203.0.113.10) by mx.example.test"
 
-    if case["auth_source"] == "trusted_gateway":
+    if case["kind"] == "missing_auth":
+        pass
+    elif case["auth_source"] == "trusted_gateway":
         message["Received-SPF"] = "fail (mx.example.com: synthetic test failure)"
         message["DKIM-Signature"] = "v=1; d=example.com; s=synthetic;"
         message["Authentication-Results"] = (
@@ -130,6 +188,14 @@ def build_message(case: dict) -> EmailMessage:
             subtype="x-msdownload",
             filename=case["filename"],
         )
+    elif kind == "safe_attachment":
+        message.set_content("Invoice PDF attached for review.")
+        message.add_attachment(
+            b"synthetic PDF placeholder",
+            maintype="application",
+            subtype="pdf",
+            filename=case["filename"],
+        )
     elif kind == "auth_failure":
         message.set_content("This is a synthetic authentication-anomaly message.")
     elif kind == "reply_mismatch":
@@ -137,6 +203,8 @@ def build_message(case: dict) -> EmailMessage:
     else:
         message.set_content("This is a synthetic benign message for parser regression testing.")
 
+    if message.is_multipart():
+        message.set_boundary(f"synthetic-{case['id']}")
     return message
 
 

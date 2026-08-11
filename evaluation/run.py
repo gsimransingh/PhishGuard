@@ -35,6 +35,10 @@ def evaluate_cases(repo_root: Path, cases: list[dict]) -> dict:
             if not path.is_file():
                 raise FileNotFoundError(f"Evaluation sample does not exist: {path}")
             parsed = parse_eml(str(path))
+        source_type = case.get(
+            "source_type",
+            "parsed_synthetic" if "parsed" in case else "checked_in_fixture",
+        )
         report = analyze(parsed, str(path), auth_source=case.get("auth_source", "unknown_capture"))
         results.append({
             "id": case["id"],
@@ -44,6 +48,7 @@ def evaluate_cases(repo_root: Path, cases: list[dict]) -> dict:
             "risk_level": report["risk_level"],
             "risk_score": report["risk_score"],
             "auth_source": case.get("auth_source", "unknown_capture"),
+            "source_type": source_type,
             "finding_checks": sorted({finding["check"] for finding in report["findings"]}),
             "correct": report["disposition"] == case["expected_disposition"],
         })
@@ -114,6 +119,7 @@ def evaluate_cases(repo_root: Path, cases: list[dict]) -> dict:
         "breakdowns": {
             "by_category": grouped_metrics("category"),
             "by_auth_source": grouped_metrics("auth_source"),
+            "by_source_type": grouped_metrics("source_type"),
             "finding_rule_case_counts": dict(sorted(rule_case_counts.items())),
         },
         "results": results,
@@ -127,7 +133,7 @@ def main() -> None:
     parser.add_argument(
         "--include-synthetic",
         action="store_true",
-        help="Include deterministic parsed-message calibration variants",
+        help="Include deterministic generated .eml calibration fixtures",
     )
     args = parser.parse_args()
 

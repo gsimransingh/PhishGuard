@@ -15,5 +15,6 @@ def build_synthetic_cases() -> list[dict]:
             "category": definition["category"],
             "expected_disposition": definition["expected_disposition"],
             "auth_source": definition["auth_source"],
+            "source_type": "synthetic_generated_eml",
         })
     return cases

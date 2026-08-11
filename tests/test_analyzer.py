@@ -83,9 +83,9 @@ class TestCriticalRiskTier:
         assert report["risk_level"] == "HIGH"
         assert report["risk_score"] < 150
 
-    def test_header_failures_plus_risky_attachment_reaches_critical(self):
-        # Stack a full header-failure baseline with a risky attachment
-        # (no threat intel needed) to cross the 150 threshold.
+    def test_header_failures_plus_corroborating_signals_reaches_critical(self):
+        # Stack a full header-failure baseline with a risky attachment and a
+        # displayed-link mismatch (no threat intel needed) to cross 150.
         parsed = _minimal_parsed(
             **{
                 "from": "PayPal <billing@paypal.com>",
@@ -96,6 +96,10 @@ class TestCriticalRiskTier:
                     "http://evil.ru/secure/update-password",
                     "http://evil.ru/confirm/account-details",
                 ],
+                "html_links": [{
+                    "displayed_text": "https://paypal.com",
+                    "href": "https://paypal-login.evil.example/verify",
+                }],
                 "attachments": [{"filename": "invoice.exe", "content_type": "application/octet-stream", "size_bytes": 1024}],
             }
         )
@@ -390,6 +394,7 @@ class TestSuspiciousUrlScoring:
         parsed = _minimal_parsed(urls=["http://evil.ru/account/verify-login"])
         report = analyze(parsed, "test.eml", run_intel=False)
         assert any("Suspicious URLs" in f for f in report["flags"])
+        assert report["risk_score"] == 0
 
     def test_ordinary_url_is_not_flagged(self):
         parsed = _minimal_parsed(urls=["http://example.com/blog/post-1"])

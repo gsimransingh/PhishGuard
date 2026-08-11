@@ -9,15 +9,15 @@ DKIM-Signature: v=1; d=example.com; s=synthetic;
 Authentication-Results: mx.example.com; spf=fail; dkim=fail; dmarc=fail
 MIME-Version: 1.0
 Content-Type: multipart/alternative;
- boundary="===============0957318581648629086=="
+ boundary="synthetic-synthetic_display_mismatch_01"
 
---===============0957318581648629086==
+--synthetic-synthetic_display_mismatch_01
 Content-Type: text/plain; charset="utf-8"
 Content-Transfer-Encoding: 7bit
 
 Please review the account notice in your email client.
 
---===============0957318581648629086==
+--synthetic-synthetic_display_mismatch_01
 Content-Type: text/html; charset="utf-8"
 Content-Transfer-Encoding: quoted-printable
 MIME-Version: 1.0
@@ -25,4 +25,4 @@ MIME-Version: 1.0
 <html><body><a href=3D"https://paypal-login.evil.example/verify">https://payp=
 al.com</a></body></html>
 
---===============0957318581648629086==--
+--synthetic-synthetic_display_mismatch_01--

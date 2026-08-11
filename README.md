@@ -180,6 +180,11 @@ and HIGH results use `suspicious_escalate`, while LOW results use
 `likely_benign`. This keeps triage cautious until the evidence is strong enough
 to support a malicious classification.
 
+URL words such as `login`, `verify`, or `password` remain visible as analyst
+evidence but are score-neutral by themselves. Stronger URL structure,
+brand-impersonation, authentication, attachment, or reputation findings must
+corroborate them before severity increases.
+
 ## Known limitations
 
 - HTML is parsed only for anchor evidence; PhishGuard does not render HTML, fetch images, execute scripts, or interpret CSS-generated content.

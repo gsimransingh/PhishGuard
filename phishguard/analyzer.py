@@ -152,10 +152,10 @@ def analyze(
         add_finding(
             "suspicious_url_keywords",
             f"Suspicious URLs found: {sus_urls}",
-            min(len(sus_urls) * 10, 30), "low",
+            0, "low",
             {"urls": sus_urls},
-            "Legitimate authentication and account-management pages often contain these words.",
-            "Inspect destination domains and compare them with the claimed sender.",
+            "Legitimate authentication and account-management pages often contain these words; this signal is informational until corroborated.",
+            "Inspect destination domains and compare them with the claimed sender. Escalate based on stronger corroborating evidence.",
         )
 
     # Reuse the standalone URL engine for every URL found in an email.  Keep

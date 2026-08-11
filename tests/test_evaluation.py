@@ -40,6 +40,7 @@ def test_synthetic_corpus_is_backed_by_eml_files():
     repo_root = Path(__file__).parent.parent
     cases = build_synthetic_cases()
 
-    assert len(cases) == 27
+    assert len(cases) == 34
     assert all((repo_root / case["path"]).is_file() for case in cases)
     assert all(case["path"].endswith(".eml") for case in cases)
+    assert {case["source_type"] for case in cases} == {"synthetic_generated_eml"}
