@@ -124,11 +124,16 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", type=Path, default=Path(__file__).with_name("cases.json"))
     parser.add_argument("--output", type=Path, help="Write the JSON report to this path")
+    parser.add_argument(
+        "--include-synthetic",
+        action="store_true",
+        help="Include deterministic parsed-message calibration variants",
+    )
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parent.parent
     cases = json.loads(args.dataset.read_text(encoding="utf-8"))
-    if args.dataset.name == "cases.json":
+    if args.include_synthetic:
         from evaluation.synthetic_cases import build_synthetic_cases
         cases.extend(build_synthetic_cases())
     report = evaluate_cases(repo_root, cases)

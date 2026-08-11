@@ -85,3 +85,23 @@ def test_cef_report_escapes_extension_delimiters_and_newlines():
 
     assert "equals\\=value\\|pipe next" in cef
     assert "flag\\=value\\|pipe next" in cef
+
+
+def test_analyst_handoff_fields_render_in_html_and_cef():
+    report = _report_with_untrusted_content()
+    report["disposition"] = "suspicious_escalate"
+    report["triage"] = {
+        "priority": "P2",
+        "confidence": "high",
+        "evidence_status": "sufficient",
+        "escalation_reason": "Reply-To mismatch",
+        "recommended_actions": ["Verify the reply destination independently."],
+    }
+
+    html = generate_html_report(report)
+    cef = generate_cef_log(report)
+
+    assert "suspicious_escalate" in html
+    assert "Reply-To mismatch" in html
+    assert "cs2Label=Disposition cs2=suspicious_escalate" in cef
+    assert "cs3Label=Priority cs3=P2" in cef

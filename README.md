@@ -26,7 +26,9 @@ Given an `.eml` file, PhishGuard can:
 - Interpret SPF, DKIM, and DMARC results while preserving the original authentication evidence
 - Look up SPF and DMARC DNS records
 - Flag Reply-To mismatches, displayed-link versus destination mismatches, suspicious URL keywords, deceptive filenames, risky extensions, and executable MIME mismatches
+- Reuse standalone URL structure and brand-impersonation checks during email triage
 - Explain each finding with its weight, confidence, evidence, false-positive caveat, and recommended next action
+- Assign an L1 disposition, priority, confidence, escalation reason, and recommended next steps
 - Check IPs with AbuseIPDB and URLs with VirusTotal when API keys are available
 - Produce text, JSON, HTML, CEF, batch-summary, and CSV output
 - Analyze a standalone URL or domain for structural tricks, typosquatting, RDAP registration signals, and TLS-certificate signals
@@ -184,7 +186,7 @@ to support a malicious classification.
 - DKIM signature presence is detected, but PhishGuard does not independently perform full DKIM cryptographic verification.
 - Authentication-Results headers are reported as message evidence, with an explicit `source_context`. They affect scoring only when `--auth-source trusted_gateway` is supplied; `unknown_capture` and `untrusted_capture` preserve the evidence without trusting attacker-controlled authentication claims.
 - DNS records show what a sender domain publishes; they do not independently prove a message passed authentication during delivery.
-- Standalone URL findings are not yet integrated into email URL scoring.
+- URL structure and brand-impersonation findings are integrated into email URL scoring; RDAP and TLS checks remain explicit-enrichment-only.
 - Registrable-domain extraction uses a bundled public-suffix snapshot; update the dependency periodically as the suffix list evolves.
 - Threat-intelligence coverage depends on API availability, rate limits, and configured keys.
 - Reports should be reviewed before being shared externally.
@@ -253,12 +255,18 @@ PhishGuard/
 ├── main.py
 ├── pyproject.toml
 ├── SECURITY.md
+├── evaluation/
+│   ├── cases.json
+│   ├── run.py
+│   └── synthetic_cases.py
 ├── phishguard/
 │   ├── analyzer.py
 │   ├── cli.py
 │   ├── dns_validator.py
 │   ├── email_parser.py
 │   ├── report_generator.py
+│   ├── security.py
+│   ├── triage.py
 │   ├── threat_intel.py
 │   ├── url_analyzer.py
 │   └── data/

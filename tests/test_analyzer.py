@@ -175,8 +175,20 @@ class TestAnalyzeSampleEmails:
             "risk_score", "flags", "findings", "email_metadata", "auth_headers",
             "authentication_evidence",
             "dns_validation", "iocs", "threat_intel", "received_chain",
+            "triage", "url_analysis",
         ):
             assert key in report
+
+    def test_empty_message_evidence_uses_insufficient_evidence(self):
+        parsed = _minimal_parsed(**{
+            "subject": "", "from": "", "reply_to": "", "to": "", "date": "", "message_id": "",
+            "spf": "", "dkim": "", "dmarc": "", "authentication_results": [],
+            "urls": [], "html_links": [], "ips": [], "attachments": [], "received_chain": [],
+        })
+        report = analyze(parsed, "empty.eml", run_intel=False)
+
+        assert report["disposition"] == "insufficient_evidence"
+        assert report["triage"]["evidence_status"] == "insufficient"
 
 
 # ---------------------------------------------------------------------------

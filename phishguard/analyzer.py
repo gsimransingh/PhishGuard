@@ -295,7 +295,15 @@ def analyze(
     else:
         risk_level = "LOW"
 
-    disposition = disposition_for_findings(risk_level, findings)
+    evidence_sufficient = any(
+        parsed.get(field)
+        for field in ("subject", "from", "to", "date", "body_text", "body_html", "urls", "attachments", "authentication_results")
+    )
+    disposition = disposition_for_findings(
+        risk_level,
+        findings,
+        evidence_sufficient=evidence_sufficient,
+    )
     return {
         "tool":        "PhishGuard",
         "schema_version": "1.0",
@@ -304,7 +312,7 @@ def analyze(
         "file":        os.path.basename(file_path),
         "risk_level":  risk_level,
         "disposition": disposition,
-        "triage": _build_triage_summary(disposition, findings),
+        "triage": _build_triage_summary(disposition, findings, evidence_sufficient),
         "risk_score":  score,
         "flags":       flags,
         "findings":    findings,
@@ -344,7 +352,11 @@ def _extract_domain(from_header: str) -> str:
     return match.group(1) if match else ""
 
 
-def _build_triage_summary(disposition: str, findings: list[dict]) -> dict:
+def _build_triage_summary(
+    disposition: str,
+    findings: list[dict],
+    evidence_sufficient: bool = True,
+) -> dict:
     """Build a compact, consistent handoff summary for an L1 analyst."""
     priority = {
         "malicious_escalate": "P1",
@@ -377,6 +389,7 @@ def _build_triage_summary(disposition: str, findings: list[dict]) -> dict:
     return {
         "priority": priority,
         "confidence": confidence,
+        "evidence_status": "sufficient" if evidence_sufficient else "insufficient",
         "escalation_reason": reason,
         "recommended_actions": actions[:5],
     }
