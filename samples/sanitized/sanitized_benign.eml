@@ -1,0 +1,19 @@
+From: Analyst One <sender01@organization.example>
+To: Recipient One <recipient01@organization.example>
+Date: Wed, 12 Aug 2026 09:00:00 +0000
+Message-ID: <sanitized-benign-01@organization.example>
+Subject: Weekly project update
+Received: from mail.organization.example (203.0.113.10) by mx.organization.example with ESMTP
+Received-SPF: pass
+DKIM-Signature: v=1; d=organization.example; s=mail;
+Authentication-Results: mx.organization.example; spf=pass smtp.mailfrom=organization.example; dkim=pass header.d=organization.example; dmarc=pass header.from=organization.example
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+
+Hello team,
+
+The weekly project update is attached to the internal tracker. No action is
+required by email.
+
+Regards,
+Analyst One

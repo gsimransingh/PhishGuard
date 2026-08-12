@@ -1,0 +1,18 @@
+From: Billing Desk <billing@organization.example>
+Reply-To: collect01@external.example
+To: Recipient One <recipient01@organization.example>
+Date: Wed, 12 Aug 2026 09:05:00 +0000
+Message-ID: <sanitized-phishing-01@external.example>
+Subject: Urgent account verification required
+Received: from mail.external.example (198.51.100.23) by mx.organization.example with ESMTP
+Received-SPF: fail
+Authentication-Results: mx.organization.example; spf=fail smtp.mailfrom=organization.example; dkim=fail header.d=organization.example; dmarc=fail header.from=organization.example
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+
+Your account requires urgent verification.
+
+Verify your account here:
+https://paypa1.example/verify-login
+
+Do not ignore this request.

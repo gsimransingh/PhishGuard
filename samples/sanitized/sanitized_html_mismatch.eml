@@ -1,0 +1,26 @@
+From: Security Desk <security@organization.example>
+Reply-To: response01@external.example
+To: Recipient One <recipient01@organization.example>
+Date: Wed, 12 Aug 2026 09:10:00 +0000
+Message-ID: <sanitized-html-01@external.example>
+Subject: Review your security settings
+Received: from mail.external.example (198.51.100.24) by mx.organization.example with ESMTP
+Received-SPF: fail
+Authentication-Results: mx.organization.example; spf=fail smtp.mailfrom=organization.example; dkim=fail header.d=organization.example; dmarc=fail header.from=organization.example
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="sanitized-html-boundary"
+
+--sanitized-html-boundary
+Content-Type: text/plain; charset="utf-8"
+
+Review your security settings at https://organization.example/security.
+
+--sanitized-html-boundary
+Content-Type: text/html; charset="utf-8"
+
+<html><body>
+<p>Review your security settings.</p>
+<a href="https://external.example/verify">https://organization.example/security</a>
+</body></html>
+
+--sanitized-html-boundary--

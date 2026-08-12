@@ -57,6 +57,14 @@ phishguard -F samples/ -V
 phishguard -F samples/ --csv results.csv
 ```
 
+Run the safe sanitization-shaped synthetic examples:
+
+```bash
+phishguard -F samples/sanitized/ --no-banner
+```
+
+These examples are synthetic and do not replace real sanitized SOC captures.
+
 ## Privacy-first enrichment
 
 PhishGuard is offline by default. Use `--enrich` only when you have approval

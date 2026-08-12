@@ -1,0 +1,25 @@
+From: Documents Desk <documents@organization.example>
+To: Recipient One <recipient01@organization.example>
+Date: Wed, 12 Aug 2026 09:15:00 +0000
+Message-ID: <sanitized-attachment-01@organization.example>
+Subject: Requested document
+Received: from mail.organization.example (203.0.113.11) by mx.organization.example with ESMTP
+Received-SPF: pass
+DKIM-Signature: v=1; d=organization.example; s=mail;
+Authentication-Results: mx.organization.example; spf=pass smtp.mailfrom=organization.example; dkim=pass header.d=organization.example; dmarc=pass header.from=organization.example
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="sanitized-attachment-boundary"
+
+--sanitized-attachment-boundary
+Content-Type: text/plain; charset="utf-8"
+
+The requested document is attached for review.
+
+--sanitized-attachment-boundary
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename="invoice.pdf.exe"
+Content-Transfer-Encoding: base64
+
+aW5lcnQgYXR0YWNobWVudCBwbGFjZWhvbGRlcgo=
+
+--sanitized-attachment-boundary--
