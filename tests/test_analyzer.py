@@ -303,6 +303,41 @@ class TestAttachmentScoring:
         assert any(finding["id"] == "bidi_attachment_filename" for finding in report["findings"])
 
 
+class TestAbusedAttachmentTypes:
+    def _ids(self, filename, content_type="application/octet-stream"):
+        parsed = _minimal_parsed(attachments=[
+            {"filename": filename, "content_type": content_type, "size_bytes": 1}
+        ])
+        report = analyze(parsed, "test.eml", run_intel=False)
+        return [finding["id"] for finding in report["findings"]]
+
+    def test_script_and_macro_formats_are_flagged_as_risky(self):
+        for name in ("run.wsf", "run.wsh", "enc.vbe", "enc.jse", "macro.xlam", "deck.pptm", "tpl.dotm"):
+            assert "risky_attachment_extension" in self._ids(name), name
+
+    def test_active_content_formats_get_their_own_lower_weight_finding(self):
+        for name in ("invoice.html", "invoice.htm", "scan.svg", "notes.one", "help.chm"):
+            ids = self._ids(name, "text/html")
+            assert "active_content_attachment" in ids, name
+            assert "risky_attachment_extension" not in ids, name
+
+    def test_active_content_weight_is_lower_than_executable_weight(self):
+        parsed = _minimal_parsed(attachments=[
+            {"filename": "invoice.html", "content_type": "text/html", "size_bytes": 1}
+        ])
+        weights = {f["id"]: f["weight"] for f in analyze(parsed, "t.eml", run_intel=False)["findings"]}
+        assert weights["active_content_attachment"] < 40
+
+    def test_double_extension_with_active_content_is_flagged(self):
+        assert "double_extension_attachment" in self._ids("invoice.pdf.html", "text/html")
+
+    def test_plain_documents_and_images_are_still_clean(self):
+        for name in ("report.pdf", "photo.png", "notes.txt", "data.csv"):
+            ids = self._ids(name, "application/octet-stream")
+            assert "active_content_attachment" not in ids, name
+            assert "risky_attachment_extension" not in ids, name
+
+
 class TestAuthenticationInterpretation:
     def test_verified_dkim_failure_is_distinct_from_missing_signature(self):
         parsed = _minimal_parsed(

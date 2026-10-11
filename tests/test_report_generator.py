@@ -1,5 +1,7 @@
 """Regression tests for report rendering safety and CEF field escaping."""
 
+import re
+
 from phishguard.report_generator import generate_cef_log, generate_html_report
 
 
@@ -105,3 +107,36 @@ def test_analyst_handoff_fields_render_in_html_and_cef():
     assert "Reply-To mismatch" in html
     assert "cs2Label=Disposition cs2=suspicious_escalate" in cef
     assert "cs3Label=Priority cs3=P2" in cef
+
+
+def test_cef_src_is_the_observed_ip_and_sender_address_stays_in_suser():
+    report = _report_with_untrusted_content()
+    report["email_metadata"]["from"] = "Alice <alice@example.test>"
+    report["iocs"]["ips"] = ["203.0.113.10", "198.51.100.7"]
+
+    cef = generate_cef_log(report)
+
+    # Received headers list the newest hop first, so the last IP is the earliest hop.
+    assert re.search(r"(?:\||\s)src=198\.51\.100\.7(?:\s|$)", cef)
+    assert "suser=Alice <alice@example.test>" in cef
+    assert "src=Alice" not in cef
+
+
+def test_cef_does_not_label_the_sender_ip_as_a_destination():
+    report = _report_with_untrusted_content()
+
+    cef = generate_cef_log(report)
+
+    assert not re.search(r"(?:\||\s)dst=", cef)
+    assert "cs6Label=ObservedIPs cs6=203.0.113.10" in cef
+
+
+def test_cef_without_ips_omits_src_instead_of_inventing_one():
+    report = _report_with_untrusted_content()
+    report["iocs"]["ips"] = []
+
+    cef = generate_cef_log(report)
+
+    assert not re.search(r"(?:\||\s)src=", cef)
+    assert "cs6Label=ObservedIPs" not in cef
+    assert "suser=sender@example.test" in cef
