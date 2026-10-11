@@ -529,7 +529,14 @@ _RISKY_ATTACHMENT_EXTENSIONS = {
     ".bat", ".cmd", ".com", ".docm", ".exe", ".hta", ".img", ".iso",
     ".jar", ".js", ".lnk", ".msi", ".ps1", ".rar", ".scr", ".vbs",
     ".xlsm", ".zip", ".7z",
+    # Script hosts and macro-enabled Office formats not covered above.
+    ".wsf", ".wsh", ".vbe", ".jse", ".xlam", ".xla", ".xll",
+    ".pptm", ".ppam", ".dotm", ".xltm",
 }
+# Formats that execute script or load content when opened but are also common
+# in legitimate mail (saved receipts, exported diagrams), so they score lower.
+_ACTIVE_CONTENT_EXTENSIONS = {".html", ".htm", ".shtml", ".svg", ".one", ".chm"}
+_ALL_FLAGGED_EXTENSIONS = _RISKY_ATTACHMENT_EXTENSIONS | _ACTIVE_CONTENT_EXTENSIONS
 _BIDI_FILENAME_CHARACTERS = {"\u202a", "\u202b", "\u202d", "\u202e", "\u2066", "\u2067", "\u2068", "\u2069"}
 _EXECUTABLE_CONTENT_TYPES = {
     "application/x-dosexec", "application/x-msdownload",
@@ -556,8 +563,19 @@ def _attachment_findings(attachment: dict) -> list[dict]:
             "recommended_action": "Do not open it directly; inspect it only in an approved attachment-analysis environment.",
         })
 
+    if final_extension in _ACTIVE_CONTENT_EXTENSIONS:
+        findings.append({
+            "finding_id": "active_content_attachment",
+            "message": f"Attachment can run script or load remote content: {filename}",
+            "weight": 25,
+            "confidence": "medium",
+            "evidence": {"filename": filename, "extension": final_extension, "content_type": content_type},
+            "false_positive_note": "Saved web pages, receipts, SVG images and OneNote files are often legitimate.",
+            "recommended_action": "Do not open it in a normal browser or Office app; inspect it in an approved sandbox.",
+        })
+
     filename_parts = lowered.split(".")
-    if len(filename_parts) >= 3 and f".{filename_parts[-1]}" in _RISKY_ATTACHMENT_EXTENSIONS:
+    if len(filename_parts) >= 3 and f".{filename_parts[-1]}" in _ALL_FLAGGED_EXTENSIONS:
         findings.append({
             "finding_id": "double_extension_attachment",
             "message": f"Attachment uses a deceptive double extension: {filename}",
@@ -579,7 +597,7 @@ def _attachment_findings(attachment: dict) -> list[dict]:
             "recommended_action": "Inspect the raw filename and actual file type in an approved environment.",
         })
 
-    if content_type in _EXECUTABLE_CONTENT_TYPES and final_extension not in _RISKY_ATTACHMENT_EXTENSIONS:
+    if content_type in _EXECUTABLE_CONTENT_TYPES and final_extension not in _ALL_FLAGGED_EXTENSIONS:
         findings.append({
             "finding_id": "attachment_type_mismatch",
             "message": f"Attachment type does not match its filename: {filename} ({content_type})",

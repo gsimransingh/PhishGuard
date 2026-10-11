@@ -292,8 +292,13 @@ def generate_cef_log(report: dict) -> str:
     subject = escape_cef(report['email_metadata']['subject'][:100])
     sender = escape_cef(report['email_metadata']['from'])
 
+    ips = report['iocs'].get('ips', [])
     extensions = []
-    extensions.append(f"src={sender}")
+    # CEF 'src' is a source IP address. Received headers list the newest hop
+    # first, so the last public IP is the earliest hop seen. Lower Received
+    # headers are sender-controlled, so this is an observation, not attribution.
+    if ips:
+        extensions.append(f"src={escape_cef(ips[-1])}")
     extensions.append(f"suser={sender}")
     extensions.append(f"msg={subject}")
     extensions.append(f"cs1Label=RiskScore cs1={report['risk_score']}")
@@ -305,8 +310,9 @@ def generate_cef_log(report: dict) -> str:
 
     if report['iocs']['urls']:
         extensions.append(f"request={escape_cef(report['iocs']['urls'][0])}")
-    if report['iocs']['ips']:
-        extensions.append(f"dst={escape_cef(report['iocs']['ips'][0])}")
+    if ips:
+        observed = ','.join(str(ip) for ip in ips[:5])
+        extensions.append(f"cs6Label=ObservedIPs cs6={escape_cef(observed)}")
 
     extension_str = ' '.join(extensions)
 
