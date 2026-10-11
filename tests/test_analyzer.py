@@ -246,6 +246,22 @@ class TestExtractDomain:
     def test_returns_empty_string_when_no_at_sign(self):
         assert _extract_domain("not an email address") == ""
 
+    def test_display_name_containing_an_address_does_not_hijack_the_domain(self):
+        assert _extract_domain('"billing@paypal.com" <attacker@evil.ru>') == "evil.ru"
+
+    def test_malformed_unquoted_display_name_with_address_fails_closed(self):
+        # Two addresses parse out of this header; guessing could check the wrong domain.
+        assert _extract_domain("billing@paypal.com <attacker@evil.ru>") == ""
+
+    def test_result_is_lowercased(self):
+        assert _extract_domain("Name <User@Example.COM>") == "example.com"
+
+    def test_ambiguous_multiple_addresses_return_empty(self):
+        assert _extract_domain("a@one.com, b@two.com") == ""
+
+    def test_invalid_domain_returns_empty(self):
+        assert _extract_domain("x <user@bad domain>") == ""
+
 
 # ---------------------------------------------------------------------------
 # Scoring paths that don't need a real .eml file

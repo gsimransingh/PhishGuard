@@ -9,6 +9,7 @@ import os
 import re
 import sys
 from datetime import datetime, timezone
+from email.utils import getaddresses
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -346,10 +347,26 @@ def analyze(
     }
 
 
+_DOMAIN_RE = re.compile(
+    r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}$"
+)
+
+
 def _extract_domain(from_header: str) -> str:
-    """Extract domain from a From: header like 'Name <user@domain.com>'."""
-    match = re.search(r'@([\w.-]+)', from_header)
-    return match.group(1) if match else ""
+    """
+    Return the lowercased domain of the real sender address, or "".
+
+    Uses the RFC 5322 address parser rather than a regex over the raw header:
+    an attacker controls the display name, so '"billing@paypal.com"
+    <attacker@evil.ru>' must resolve to evil.ru, not paypal.com. Several
+    addresses in one header are ambiguous, so no domain is returned and the
+    DNS checks are skipped rather than run against a guess.
+    """
+    addresses = [addr for _, addr in getaddresses([from_header]) if addr]
+    if len(addresses) != 1 or "@" not in addresses[0]:
+        return ""
+    domain = addresses[0].rsplit("@", 1)[1].strip().lower().rstrip(".")
+    return domain if _DOMAIN_RE.match(domain) else ""
 
 
 def _build_triage_summary(
