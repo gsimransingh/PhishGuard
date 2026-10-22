@@ -88,3 +88,46 @@ def test_a3_explicit_sp_is_kept():
     from phishguard.dns_validator import _parse_dmarc_policy
 
     assert _parse_dmarc_policy("v=DMARC1; p=reject; sp=none")["subdomain_policy"] == "none"
+
+
+# --- A4: multi-string TXT records are truncated -----------------------------
+
+class _FakeTXT:
+    def __init__(self, *chunks: bytes):
+        self.strings = chunks
+
+
+def _fake_resolver(monkeypatch, answers: dict):
+    import dns.resolver
+
+    def _resolve(name, rtype, **_kwargs):
+        if name in answers:
+            return answers[name]
+        raise dns.resolver.NXDOMAIN()
+
+    monkeypatch.setattr(dns.resolver, "resolve", _resolve)
+
+
+def test_a4_spf_record_split_across_strings_is_joined(monkeypatch):
+    from phishguard.dns_validator import validate_spf_dns
+
+    _fake_resolver(monkeypatch, {
+        "example.com": [_FakeTXT(b"v=spf1 include:_spf.google.com ", b"include:mailgun.org -all")],
+    })
+
+    result = validate_spf_dns("example.com")
+
+    assert result["record"] == "v=spf1 include:_spf.google.com include:mailgun.org -all"
+
+
+def test_a4_dmarc_record_split_across_strings_is_joined(monkeypatch):
+    from phishguard.dns_validator import validate_dmarc_dns
+
+    _fake_resolver(monkeypatch, {
+        "_dmarc.example.com": [_FakeTXT(b"v=DMARC1; p=quarantine; ", b"sp=reject; rua=mailto:d@example.com")],
+    })
+
+    result = validate_dmarc_dns("example.com")
+
+    assert result["policy"]["subdomain_policy"] == "reject"
+    assert result["policy"]["report_uri"] == "mailto:d@example.com"
