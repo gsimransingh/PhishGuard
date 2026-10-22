@@ -444,6 +444,14 @@ def run_url(args: argparse.Namespace):
 def run_batch(args: argparse.Namespace):
     """Handle batch folder analysis."""
     folder = args.folder
+    output_format = getattr(args, "output", "text")
+    if output_format == "html":
+        print(
+            "[ERROR] Output format 'html' is not supported for batch analysis (-F). "
+            "Use text, json, or cef.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     if not os.path.isdir(folder):
         print(f"[ERROR] Folder not found: {_safe_terminal_text(folder)}", file=sys.stderr)
         sys.exit(1)
@@ -483,21 +491,31 @@ def run_batch(args: argparse.Namespace):
             results.append(report) # type: ignore
 
             # Print full report per file if verbose
-            if args.verbose:
+            if args.verbose and output_format == "text":
                 print_text_report(report, color=_should_use_color(getattr(args, "color", "auto"), sys.stdout))
 
         except Exception as e:
             had_errors = True
             results.append({"file": filename, "error": str(e)}) # type: ignore
 
-    # Always print summary
-    summary = print_batch_summary(results, color=_should_use_color(getattr(args, "color", "auto"), sys.stdout))
+    # Machine-readable formats own stdout; the human summary goes to stderr
+    # so `phishguard -F dir -o json | jq` and SIEM pipelines stay parseable.
+    if output_format == "json":
+        print_batch_summary(results, out=sys.stderr, color=_should_use_color(getattr(args, "color", "auto"), sys.stderr))
+        content = json.dumps(results, indent=2)
+        print(content)
+    elif output_format == "cef":
+        print_batch_summary(results, out=sys.stderr, color=_should_use_color(getattr(args, "color", "auto"), sys.stderr))
+        content = "\n".join(generate_cef_log(report) for report in results if not report.get("error"))
+        print(content)
+    else:
+        content = print_batch_summary(results, color=_should_use_color(getattr(args, "color", "auto"), sys.stdout))
 
-    # Save summary to disk if -O specified
+    # Save the same content that went to stdout if -O specified
     if args.save_output:
         with open(args.save_output, 'w', encoding='utf-8') as f:
-            f.write(summary)
-        print(f"[*] Summary saved to: {args.save_output}", file=sys.stderr)
+            f.write(content)
+        print(f"[*] Output saved to: {_safe_terminal_text(args.save_output)}", file=sys.stderr)
 
     # Export CSV if --csv specified
     if args.csv:
@@ -551,7 +569,7 @@ Examples:
         "-O", "--save-output",
         metavar="PATH",
         default=None,
-        help="Save output to disk (single: saves report, batch: saves summary)"
+        help="Save output to disk (single: saves report; batch: saves the summary, or the JSON/CEF output with -o json/cef)"
     )
 
     # External enrichment is intentionally opt-in because it can send

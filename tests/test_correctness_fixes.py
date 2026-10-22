@@ -159,3 +159,65 @@ def test_a5_ordinary_unicode_is_unchanged():
     from phishguard.cli import _safe_terminal_text
 
     assert _safe_terminal_text("Ünïcødé – ok") == "Ünïcødé – ok"
+
+
+# --- A6: batch mode silently ignores -o -----------------------------------
+
+import json
+import shutil
+import sys
+from pathlib import Path
+
+import pytest
+
+SAMPLES = Path(__file__).parent.parent / "samples"
+
+
+def _batch_folder(tmp_path):
+    for name in ("legitimate_email.eml", "phishing_test.eml"):
+        shutil.copy(SAMPLES / name, tmp_path / name)
+    return tmp_path
+
+
+def _run_cli(monkeypatch, *argv):
+    from phishguard import cli
+
+    monkeypatch.setattr(sys, "argv", ["phishguard", "--no-banner", "--no-color", *argv])
+    cli.main()
+
+
+def test_a6_batch_json_outputs_a_json_array_on_stdout(tmp_path, monkeypatch, capsys):
+    _run_cli(monkeypatch, "-F", str(_batch_folder(tmp_path)), "-o", "json", "-V")
+
+    captured = capsys.readouterr()
+    reports = json.loads(captured.out)  # stdout must be pure JSON, even with -V
+    assert [report["file"] for report in reports] == ["legitimate_email.eml", "phishing_test.eml"]
+    assert all("risk_level" in report for report in reports)
+    assert "Batch Analysis Summary" in captured.err
+
+
+def test_a6_batch_json_saves_json_with_save_output(tmp_path, monkeypatch, capsys):
+    out_file = tmp_path / "out" / "batch.json"
+    out_file.parent.mkdir()
+    _run_cli(monkeypatch, "-F", str(_batch_folder(tmp_path)), "-o", "json", "-O", str(out_file))
+
+    capsys.readouterr()
+    assert len(json.loads(out_file.read_text(encoding="utf-8"))) == 2
+
+
+def test_a6_batch_cef_outputs_one_event_per_email(tmp_path, monkeypatch, capsys):
+    _run_cli(monkeypatch, "-F", str(_batch_folder(tmp_path)), "-o", "cef")
+
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert len(lines) == 2
+    assert all(line.startswith("CEF:0|PhishGuard|") for line in lines)
+
+
+def test_a6_batch_html_is_rejected_explicitly(tmp_path, monkeypatch, capsys):
+    with pytest.raises(SystemExit) as exit_info:
+        _run_cli(monkeypatch, "-F", str(_batch_folder(tmp_path)), "-o", "html")
+
+    captured = capsys.readouterr()
+    assert exit_info.value.code == 1
+    assert captured.out == ""
+    assert "not supported for batch" in captured.err
