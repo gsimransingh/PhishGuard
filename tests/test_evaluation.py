@@ -49,7 +49,7 @@ def test_synthetic_corpus_is_backed_by_eml_files():
 # Ratchet for the headline metric. Raise these floors whenever a fix lands;
 # never lower them to make a change pass. Values measured 2026-10-22 on the
 # 41-case corpus (7 fixtures + 34 synthetic) in default CLI mode.
-DEFAULT_MODE_RECALL_FLOOR = 10 / 21
+DEFAULT_MODE_RECALL_FLOOR = 11 / 21  # 0.7 PR2 severity floor: was 10/21
 DEFAULT_MODE_MAX_FALSE_POSITIVE_RATE = 0.0
 
 

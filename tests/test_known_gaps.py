@@ -79,7 +79,6 @@ def test_attachment_sha256_is_reported(tmp_path):
     assert len(attachment.get("sha256", "")) == 64
 
 
-@gap
 def test_direct_signal_is_never_likely_benign(tmp_path):
     raw = _multipart_with_part(
         'Content-Type: application/x-msdownload; name="invoice.pdf"\n'
