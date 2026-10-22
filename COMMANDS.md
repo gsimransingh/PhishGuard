@@ -71,11 +71,27 @@ phishguard -F samples/ --enrich --csv results.csv
 `--enrich` is capped at ten files in batch mode. It can query DNS and, with
 configured API keys, contact AbuseIPDB or VirusTotal. VirusTotal results are
 lookup-only by default; add `--submit-unknown-urls` when you explicitly approve
-submitting URLs that VirusTotal has not seen before. Use `--auth-source`
-(`unknown_capture`, `trusted_gateway`, or `untrusted_capture`) to preserve the
-provenance of Authentication-Results headers in JSON reports. Authentication
-results affect scoring only for `trusted_gateway`; the other values preserve
-the evidence but do not trust it for scoring.
+submitting URLs that VirusTotal has not seen before.
+
+## Authentication scoring
+
+SPF/DKIM/DMARC are scored only from your own receiving server's
+`Authentication-Results` header. Set its authserv-id once (the text before the
+first `;` in the topmost `Authentication-Results` header of any received mail):
+
+```powershell
+setx PHISHGUARD_TRUSTED_AUTHSERV_IDS "mx.example.com"
+```
+
+```bash
+export PHISHGUARD_TRUSTED_AUTHSERV_IDS="mx.example.com"
+```
+
+Override it for one run with `--trusted-authserv-id HOST` (repeatable). Without
+either, results are shown but not scored, a `[!]` warning is printed, and reports
+show `Auth score : OFF`. `--auth-source trusted_gateway` trusts every
+Authentication-Results header, including forged ones; prefer the authserv-id
+setting.
 
 Email reports include the SOC L1 disposition (`likely_benign`,
 `suspicious_escalate`, `malicious_escalate`, or `insufficient_evidence`), a
@@ -102,7 +118,7 @@ Use `--no-banner` for scheduled jobs that do not need the startup banner.
 
 ## Offline evaluation
 
-Headline metrics (default CLI mode) and every miss, on the full corpus:
+Headline metrics (configured, unconfigured, per-case labels) and every miss:
 
 ```bash
 python -m evaluation.run --include-synthetic --summary

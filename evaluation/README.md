@@ -7,14 +7,23 @@ The evaluation manifest defines the current SOC L1 disposition contract:
 - `malicious_escalate`
 - `insufficient_evidence`
 
-## Headline metric: default CLI mode
+## Headline metrics: configured and unconfigured
 
-Every report now includes a `default_cli_mode` block that scores **every case
-with `auth_source=unknown_capture`**, which is what an analyst gets when
-running the CLI with no flags. Treat this as the headline number. The
-per-case `auth_source` labels are still reported, but they can leak the
+Every report scores **every case with `auth_source=unknown_capture`** (what an
+analyst gets from the CLI without `--auth-source`) in two ways:
+
+- `configured_mode` (**headline**): with `trusted_authserv_ids` set to the
+  corpus's receiving servers (`CORPUS_TRUSTED_AUTHSERV_IDS` in `run.py`). This
+  matches a SOC that has set `PHISHGUARD_TRUSTED_AUTHSERV_IDS`.
+- `default_cli_mode`: no configuration at all. Authentication is recorded but
+  not scored. Published so the cost of skipping setup stays visible.
+
+The per-case `auth_source` labels are still reported, but they can leak the
 expected answer: if only phishing cases are labelled `trusted_gateway`, only
 phishing cases get credit for authentication failures.
+
+The corpus is synthetic and was written to exercise these rules, so
+configured-mode results are a regression guard, not a real-world accuracy claim.
 
 Quick summary, including every default-mode miss:
 
@@ -23,7 +32,7 @@ python -m evaluation.run --include-synthetic --summary
 ```
 
 `tests/test_evaluation.py` enforces a recall floor and false-positive ceiling
-for default mode. Raise the floor whenever a fix lands; never lower it.
+for both modes. Raise the floor whenever a fix lands; never lower it.
 
 Confirmed detection gaps are tracked as `xfail(strict=True)` tests in
 `tests/test_known_gaps.py`. When a fix makes one pass, strict mode fails the
