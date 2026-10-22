@@ -191,6 +191,27 @@ def _merge_urls(*url_groups: list[str]) -> list[str]:
     return urls
 
 
+_TRAILING_URL_PUNCTUATION = ".,;:!?'*"
+
+
+def _trim_trailing_punctuation(url: str) -> str:
+    """Drop sentence punctuation that the URL regex swallows from prose.
+
+    "Log in (https://paypal.com/login)." must yield the URL without ")." so
+    IOCs and reputation lookups use the real destination. A closing
+    parenthesis is kept when it balances one inside the URL, as in
+    https://en.wikipedia.org/wiki/Phishing_(security).
+    """
+    while url:
+        if url[-1] in _TRAILING_URL_PUNCTUATION:
+            url = url[:-1]
+        elif url[-1] == ")" and url.count(")") > url.count("("):
+            url = url[:-1]
+        else:
+            break
+    return url
+
+
 def _extract_urls(text: str) -> list[str]:
     """Extract unique URLs from a block of text, preserving their appearance order."""
     url_pattern = re.compile(
@@ -200,7 +221,7 @@ def _extract_urls(text: str) -> list[str]:
     urls: list[str] = []
     seen_urls: set[str] = set()
     for match in url_pattern.finditer(text):
-        url = match.group(0)
+        url = _trim_trailing_punctuation(match.group(0))
         if url in seen_urls:
             continue
         if len(urls) >= MAX_URLS:
