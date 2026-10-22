@@ -11,6 +11,17 @@ from phishguard.url_analyzer import registrable_domain
 # ---------------------------------------------------------------------------
 
 
+def _join_txt(rdata) -> str:
+    """Return one TXT record as a single string.
+
+    DNS stores TXT data as chunks of at most 255 bytes, and long SPF/DMARC
+    records are split across several. RFC 7208 section 3.3 says the chunks
+    are concatenated with no separator, so reading them one by one truncates
+    the record.
+    """
+    return b"".join(rdata.strings).decode("utf-8", errors="ignore")
+
+
 def validate_spf_dns(domain: str) -> dict[str, Optional[str]]:
     """
     Look up the SPF TXT record for a given domain via live DNS query.
@@ -24,15 +35,14 @@ def validate_spf_dns(domain: str) -> dict[str, Optional[str]]:
     try:
         answers = dns.resolver.resolve(domain, 'TXT', lifetime=5)
         for rdata in answers:
-            for txt_string in rdata.strings:
-                decoded = txt_string.decode('utf-8', errors='ignore')
-                if decoded.startswith('v=spf1'):
-                    return {
-                        "domain": domain,
-                        "status": "found",
-                        "record": decoded,
-                        "error": None,
-                    }
+            decoded = _join_txt(rdata)
+            if decoded.startswith('v=spf1'):
+                return {
+                    "domain": domain,
+                    "status": "found",
+                    "record": decoded,
+                    "error": None,
+                }
         return {
             "domain": domain,
             "status": "not_found",
@@ -85,11 +95,10 @@ def _lookup_dmarc(domain: str, lookup_domain: str) -> dict[str, Optional[str]]:
     try:
         answers = dns.resolver.resolve(dmarc_domain, 'TXT', lifetime=5)
         for rdata in answers:
-            for txt_string in rdata.strings:
-                decoded = txt_string.decode('utf-8', errors='ignore')
-                if decoded.startswith('v=DMARC1'):
-                    return {**base, "status": "found", "record": decoded,
-                            "policy": _parse_dmarc_policy(decoded), "error": None}
+            decoded = _join_txt(rdata)
+            if decoded.startswith('v=DMARC1'):
+                return {**base, "status": "found", "record": decoded,
+                        "policy": _parse_dmarc_policy(decoded), "error": None}
         return {**base, "status": "not_found", "record": "", "policy": None,
                 "error": "No DMARC record found"}
     except dns.resolver.NXDOMAIN:
@@ -116,9 +125,11 @@ def _parse_dmarc_policy(record: str) -> dict[str, str]:
         if '=' in part:
             key, _, value = part.partition('=')
             tags[key.strip()] = value.strip()
+    policy = tags.get("p", "none")
     return {
-        "policy":           tags.get("p", "none"),
-        "subdomain_policy": tags.get("sp", "none"),
+        "policy":           policy,
+        # RFC 7489 section 6.3: when sp is absent, subdomains use p.
+        "subdomain_policy": tags.get("sp", policy),
         "report_uri":       tags.get("rua", ""),
         "pct":              tags.get("pct", "100"),
     }

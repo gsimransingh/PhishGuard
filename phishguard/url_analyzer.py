@@ -445,7 +445,13 @@ def check_domain_registration(hostname: str, timeout: int = 8) -> dict:
                             break
                 break
 
-        domain_status = data.get("status", [])
+        # RDAP comes from an external server: keep only string status codes
+        # so a malformed reply degrades to "no status" instead of crashing.
+        raw_status = data.get("status", [])
+        domain_status = (
+            [code for code in raw_status if isinstance(code, str)]
+            if isinstance(raw_status, list) else []
+        )
 
         if not created:
             return {

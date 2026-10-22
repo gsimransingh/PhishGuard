@@ -11,6 +11,7 @@ import sys
 import os
 import csv
 import secrets
+import unicodedata
 from datetime import datetime, timezone
 
 from phishguard.email_parser import parse_eml # type: ignore
@@ -90,8 +91,13 @@ def _safe_terminal_text(value: object) -> str:
             escaped.append("\\r")
         elif character == "\t":
             escaped.append("\\t")
-        elif ord(character) < 32 or ord(character) == 127:
-            escaped.append(f"\\x{ord(character):02x}")
+        elif unicodedata.category(character) in ("Cc", "Cf"):
+            # Cc: C0/C1 controls (incl. ESC, DEL, 8-bit CSI U+009B).
+            # Cf: invisible format characters, incl. bidi overrides such as
+            # U+202E that can make "moc.live" display as "evil.com", and
+            # zero-width characters used to split brand names.
+            code_point = ord(character)
+            escaped.append(f"\\x{code_point:02x}" if code_point <= 0xFF else f"\\u{code_point:04x}")
         else:
             escaped.append(character)
     return "".join(escaped)
@@ -365,6 +371,21 @@ def export_csv(results: list[dict], csv_path: str): # type: ignore
 # Single File Analysis
 # ---------------------------------------------------------------------------
 
+def _save_output(path: str, content: str) -> None:
+    """Write a report to disk, failing with a clean message instead of a traceback."""
+    try:
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(content)
+    except OSError as error:
+        print(
+            f"[ERROR] Could not write output to {_safe_terminal_text(path)}: "
+            f"{_safe_terminal_text(error.strerror or error)}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    print(f"[*] Output saved to: {_safe_terminal_text(path)}", file=sys.stderr)
+
+
 def run_single(args: argparse.Namespace):
     """Handle single file analysis."""
     if not os.path.isfile(args.file):
@@ -382,8 +403,15 @@ def run_single(args: argparse.Namespace):
             auth_source=getattr(args, "auth_source", "unknown_capture"),
         ) # type: ignore
     except EmailLimitError as error:
-        print(f"[ERROR] Input rejected: {error}", file=sys.stderr)
+        print(f"[ERROR] Input rejected: {_safe_terminal_text(error)}", file=sys.stderr)
         sys.exit(2)
+    except OSError as error:
+        print(
+            f"[ERROR] Could not read {_safe_terminal_text(args.file)}: "
+            f"{_safe_terminal_text(error.strerror or error)}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     if args.output == "json":
         content = json.dumps(report, indent=2)
@@ -398,9 +426,7 @@ def run_single(args: argparse.Namespace):
         content = print_text_report(report, color=_should_use_color(args.color, sys.stdout))
 
     if args.save_output:
-        with open(args.save_output, 'w', encoding='utf-8') as f:
-            f.write(content)
-        print(f"[*] Output saved to: {args.save_output}", file=sys.stderr)
+        _save_output(args.save_output, content)
 
 
 # ---------------------------------------------------------------------------
@@ -426,9 +452,7 @@ def run_url(args: argparse.Namespace):
         content = print_url_report(report, color=_should_use_color(args.color, sys.stdout))
 
     if args.save_output:
-        with open(args.save_output, 'w', encoding='utf-8') as f:
-            f.write(content)
-        print(f"[*] Output saved to: {args.save_output}", file=sys.stderr)
+        _save_output(args.save_output, content)
 
 
 # ---------------------------------------------------------------------------
@@ -438,6 +462,14 @@ def run_url(args: argparse.Namespace):
 def run_batch(args: argparse.Namespace):
     """Handle batch folder analysis."""
     folder = args.folder
+    output_format = getattr(args, "output", "text")
+    if output_format == "html":
+        print(
+            "[ERROR] Output format 'html' is not supported for batch analysis (-F). "
+            "Use text, json, or cef.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     if not os.path.isdir(folder):
         print(f"[ERROR] Folder not found: {_safe_terminal_text(folder)}", file=sys.stderr)
         sys.exit(1)
@@ -477,25 +509,41 @@ def run_batch(args: argparse.Namespace):
             results.append(report) # type: ignore
 
             # Print full report per file if verbose
-            if args.verbose:
+            if args.verbose and output_format == "text":
                 print_text_report(report, color=_should_use_color(getattr(args, "color", "auto"), sys.stdout))
 
         except Exception as e:
             had_errors = True
             results.append({"file": filename, "error": str(e)}) # type: ignore
 
-    # Always print summary
-    summary = print_batch_summary(results, color=_should_use_color(getattr(args, "color", "auto"), sys.stdout))
+    # Machine-readable formats own stdout; the human summary goes to stderr
+    # so `phishguard -F dir -o json | jq` and SIEM pipelines stay parseable.
+    if output_format == "json":
+        print_batch_summary(results, out=sys.stderr, color=_should_use_color(getattr(args, "color", "auto"), sys.stderr))
+        content = json.dumps(results, indent=2)
+        print(content)
+    elif output_format == "cef":
+        print_batch_summary(results, out=sys.stderr, color=_should_use_color(getattr(args, "color", "auto"), sys.stderr))
+        content = "\n".join(generate_cef_log(report) for report in results if not report.get("error"))
+        print(content)
+    else:
+        content = print_batch_summary(results, color=_should_use_color(getattr(args, "color", "auto"), sys.stdout))
 
-    # Save summary to disk if -O specified
+    # Save the same content that went to stdout if -O specified
     if args.save_output:
-        with open(args.save_output, 'w', encoding='utf-8') as f:
-            f.write(summary)
-        print(f"[*] Summary saved to: {args.save_output}", file=sys.stderr)
+        _save_output(args.save_output, content)
 
     # Export CSV if --csv specified
     if args.csv:
-        export_csv(results, args.csv)
+        try:
+            export_csv(results, args.csv)
+        except OSError as error:
+            print(
+                f"[ERROR] Could not write output to {_safe_terminal_text(args.csv)}: "
+                f"{_safe_terminal_text(error.strerror or error)}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
     if had_errors:
         print("[ERROR] One or more files could not be analyzed.", file=sys.stderr)
@@ -545,7 +593,7 @@ Examples:
         "-O", "--save-output",
         metavar="PATH",
         default=None,
-        help="Save output to disk (single: saves report, batch: saves summary)"
+        help="Save output to disk (single: saves report; batch: saves the summary, or the JSON/CEF output with -o json/cef)"
     )
 
     # External enrichment is intentionally opt-in because it can send
