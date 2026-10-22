@@ -49,7 +49,6 @@ gap = pytest.mark.xfail(strict=True, reason="Known detection gap; see README")
 
 # --- P0: phishing that currently comes back likely_benign ------------------
 
-@gap
 def test_inline_disposition_attachment_is_extracted(tmp_path):
     raw = _multipart_with_part(
         'Content-Type: application/octet-stream; name="invoice.exe"\n'
@@ -58,13 +57,11 @@ def test_inline_disposition_attachment_is_extracted(tmp_path):
     assert "risky_attachment_extension" in _checks(_analyze(tmp_path, raw))
 
 
-@gap
 def test_attachment_without_disposition_is_extracted(tmp_path):
     raw = _multipart_with_part('Content-Type: application/octet-stream; name="invoice.exe"\n')
     assert "risky_attachment_extension" in _checks(_analyze(tmp_path, raw))
 
 
-@gap
 def test_executable_bytes_behind_document_name_are_flagged(tmp_path):
     raw = _multipart_with_part(
         "Content-Type: application/octet-stream\n"
@@ -73,7 +70,6 @@ def test_executable_bytes_behind_document_name_are_flagged(tmp_path):
     assert "attachment_type_mismatch" in _checks(_analyze(tmp_path, raw))
 
 
-@gap
 def test_attachment_sha256_is_reported(tmp_path):
     raw = _multipart_with_part(
         "Content-Type: application/pdf\n"

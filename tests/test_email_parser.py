@@ -11,17 +11,21 @@ Covers:
   not the whole 172.x.x.x range)
 """
 
+from email import message_from_string
+from email import policy as _policy
+
 import pytest
 
 from phishguard.email_parser import (
+    _extract_attachments,
     _extract_html_links,
     _extract_ips,
     _extract_urls,
     _is_private_ip,
+    _sniff_file_type,
     parse_eml,
 )
-from phishguard.security import EmailLimitError, MAX_URLS
-
+from phishguard.security import MAX_URLS, EmailLimitError
 
 # ---------------------------------------------------------------------------
 # parse_eml() — integration tests against real sample files
@@ -207,3 +211,60 @@ class TestExtractIps:
     def test_preserves_ip_appearance_order(self):
         text = "185.220.101.47 then 8.8.8.8 then 185.220.101.47"
         assert _extract_ips(text) == ["185.220.101.47", "8.8.8.8"]
+
+
+# --- 0.7: attachment detection beyond Content-Disposition -----------------
+
+
+
+def _msg(raw: str):
+    return message_from_string(raw, policy=_policy.default)
+
+
+def test_text_bodies_are_not_attachments():
+    msg = _msg(
+        'Content-Type: multipart/alternative; boundary="b"\n\n'
+        "--b\nContent-Type: text/plain\n\nhi\n"
+        "--b\nContent-Type: text/html\n\n<p>hi</p>\n--b--\n"
+    )
+    assert _extract_attachments(msg) == []
+
+
+def test_inline_image_is_recorded_with_hash_but_no_name_is_required():
+    msg = _msg(
+        'Content-Type: multipart/related; boundary="b"\n\n'
+        "--b\nContent-Type: text/html\n\n<img src=cid:logo>\n"
+        "--b\nContent-Type: image/png\nContent-ID: <logo>\nContent-Transfer-Encoding: base64\n\niVBORw0KGgo=\n--b--\n"
+    )
+    [attachment] = _extract_attachments(msg)
+    assert attachment["content_type"] == "image/png"
+    assert attachment["disposition"] == "none"
+    assert len(attachment["sha256"]) == 64
+    assert attachment["detected_type"] == "unknown"
+
+
+def test_sha256_matches_decoded_payload():
+    import hashlib
+
+    msg = _msg(
+        'Content-Type: multipart/mixed; boundary="b"\n\n'
+        "--b\nContent-Type: text/plain\n\nx\n"
+        '--b\nContent-Type: application/pdf\nContent-Disposition: attachment; filename="a.pdf"\n'
+        "Content-Transfer-Encoding: base64\n\nJVBERi0xLjQK\n--b--\n"
+    )
+    [attachment] = _extract_attachments(msg)
+    assert attachment["sha256"] == hashlib.sha256(b"%PDF-1.4\n").hexdigest()
+    assert attachment["detected_type"] == "pdf"
+
+
+@pytest.mark.parametrize("payload, expected", [
+    (b"MZ\x90\x00", "pe_executable"),
+    (b"\x7fELF\x02", "elf_executable"),
+    (b"PK\x03\x04\x14", "zip_container"),
+    (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1", "ole_compound"),
+    (b"%PDF-1.7", "pdf"),
+    (b"hello", "unknown"),
+    (b"", "unknown"),
+])
+def test_file_signature_sniffing(payload, expected):
+    assert _sniff_file_type(payload) == expected

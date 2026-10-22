@@ -538,6 +538,8 @@ _RISKY_ATTACHMENT_EXTENSIONS = {
 _ACTIVE_CONTENT_EXTENSIONS = {".html", ".htm", ".shtml", ".svg", ".one", ".chm"}
 _ALL_FLAGGED_EXTENSIONS = _RISKY_ATTACHMENT_EXTENSIONS | _ACTIVE_CONTENT_EXTENSIONS
 _BIDI_FILENAME_CHARACTERS = {"\u202a", "\u202b", "\u202d", "\u202e", "\u2066", "\u2067", "\u2068", "\u2069"}
+# detected_type labels (from file signatures) that mean "this runs when opened".
+_EXECUTABLE_FILE_SIGNATURES = {"pe_executable", "elf_executable", "windows_shortcut"}
 _EXECUTABLE_CONTENT_TYPES = {
     "application/x-dosexec", "application/x-msdownload",
     "application/x-msdos-program", "application/x-executable",
@@ -597,14 +599,28 @@ def _attachment_findings(attachment: dict) -> list[dict]:
             "recommended_action": "Inspect the raw filename and actual file type in an approved environment.",
         })
 
-    if content_type in _EXECUTABLE_CONTENT_TYPES and final_extension not in _ALL_FLAGGED_EXTENSIONS:
+    detected_type = str(attachment.get("detected_type", "unknown"))
+    executable_bytes = detected_type in _EXECUTABLE_FILE_SIGNATURES
+    if (content_type in _EXECUTABLE_CONTENT_TYPES or executable_bytes) and final_extension not in _ALL_FLAGGED_EXTENSIONS:
         findings.append({
             "finding_id": "attachment_type_mismatch",
-            "message": f"Attachment type does not match its filename: {filename} ({content_type})",
+            "message": (
+                f"Attachment type does not match its filename: {filename} "
+                f"(declared {content_type}, file signature: {detected_type})"
+            ),
             "weight": 30,
             "confidence": "high",
-            "evidence": {"filename": filename, "extension": final_extension, "content_type": content_type},
-            "false_positive_note": "Some mail clients assign inaccurate generic MIME types.",
+            "evidence": {
+                "filename": filename,
+                "extension": final_extension,
+                "content_type": content_type,
+                "detected_type": detected_type,
+                "sha256": attachment.get("sha256", ""),
+            },
+            "false_positive_note": (
+                "Some mail clients assign inaccurate generic MIME types; a file "
+                "signature match is stronger evidence than the MIME type alone."
+            ),
             "recommended_action": "Verify the file signature in an approved sandbox before opening it.",
         })
 

@@ -1,3 +1,4 @@
+import hashlib
 import ipaddress
 import os
 import re
@@ -255,18 +256,60 @@ def _extract_ips(text: str) -> list[str]:
     return [ip for ip in all_ips if not _is_private_ip(ip)]
 
 
+# File signatures (magic bytes) checked against the start of each attachment.
+# Filenames and MIME types are attacker-chosen; the first bytes are not.
+_MAGIC_SIGNATURES = (
+    (b"MZ", "pe_executable"),
+    (b"\x7fELF", "elf_executable"),
+    (b"L\x00\x00\x00\x01\x14\x02\x00", "windows_shortcut"),
+    (b"PK\x03\x04", "zip_container"),  # zip, docx/xlsx/pptx, jar, msix
+    (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1", "ole_compound"),  # doc/xls/msi
+    (b"Rar!\x1a\x07", "rar_archive"),
+    (b"7z\xbc\xaf\x27\x1c", "7z_archive"),
+    (b"%PDF-", "pdf"),
+)
+
+
+def _sniff_file_type(payload: bytes) -> str:
+    """Return a coarse file type from the payload's leading bytes."""
+    for signature, label in _MAGIC_SIGNATURES:
+        if payload.startswith(signature):
+            return label
+    return "unknown"
+
+
+def _is_attachment_part(part: Message) -> bool:
+    """Decide whether a MIME part is a file the recipient could open.
+
+    Attackers mark payloads `Content-Disposition: inline`, or omit the header,
+    to slip past tools that only look for `attachment`. Mail clients still
+    offer such parts as files, so a part counts when it says it is an
+    attachment, carries a filename, or is non-text leaf content.
+    """
+    if part.is_multipart():
+        return False
+    if part.get_content_disposition() == "attachment" or part.get_filename():
+        return True
+    return part.get_content_maintype() not in ("text", "multipart", "message")
+
+
 def _extract_attachments(msg: Message) -> list[dict]:
-    """Extract metadata of any attachments (filename, content-type, size)."""
+    """Extract attachment metadata, the detected file type, and a SHA-256 IOC."""
     attachments: list[dict] = []
     for part in msg.walk():
-        if part.get_content_disposition() == "attachment":
-            if len(attachments) >= MAX_ATTACHMENTS:
-                raise EmailLimitError(
-                    f"Email contains more than {MAX_ATTACHMENTS} attachments."
-                )
-            attachments.append({
-                "filename":     part.get_filename(""),
-                "content_type": part.get_content_type(),
-                "size_bytes":   len(part.get_payload(decode=True) or b"")
-            })
+        if not _is_attachment_part(part):
+            continue
+        if len(attachments) >= MAX_ATTACHMENTS:
+            raise EmailLimitError(
+                f"Email contains more than {MAX_ATTACHMENTS} attachments."
+            )
+        payload = part.get_payload(decode=True) or b""
+        attachments.append({
+            "filename":      part.get_filename("") or "",
+            "content_type":  part.get_content_type(),
+            "disposition":   part.get_content_disposition() or "none",
+            "size_bytes":    len(payload),
+            "sha256":        hashlib.sha256(payload).hexdigest(),
+            "detected_type": _sniff_file_type(payload[:16]),
+        })
     return attachments
