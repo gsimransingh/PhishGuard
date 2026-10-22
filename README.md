@@ -1,37 +1,70 @@
 # PhishGuard
 
-> A Python CLI for helping SOC analysts triage suspicious email files. It extracts evidence, applies explainable risk signals, optionally enriches IOCs, and produces reports for analyst review.
+> Explainable phishing-email triage for SOC analysts. PhishGuard takes a suspicious `.eml` file, extracts the evidence, scores it with rules you can read, and hands the analyst a disposition, a priority, and next steps.
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-## Purpose
+## Who it is for
 
-PhishGuard reduces repetitive Tier 1 email-triage work. It is not an automated blocking engine and must not replace analyst judgment.
+PhishGuard is built for **Tier 1 / Tier 2 SOC analysts** working a reported-phishing queue. It is a decision-support CLI: it speeds up evidence gathering and makes the reasoning behind every score visible. It does not block mail, does not replace analyst judgment, and is not a consumer phishing checker.
 
-It should help an analyst answer:
+For each reported email it answers four questions:
 
-- What email, URL, IP, attachment, and authentication signals were found?
-- Why does each signal matter?
-- What evidence supports the assigned risk level?
-- What should be investigated next?
+- What sender, link, attachment, and authentication evidence is present?
+- Why does each piece of evidence matter, and how could it be wrong?
+- What disposition and priority does the evidence support?
+- What should the analyst check next?
 
-## Current capabilities
+## Current status: read this before trusting a score
 
-Given an `.eml` file, PhishGuard can:
+PhishGuard is **pre-1.0**. Detection quality is measured on an offline corpus and the numbers are published here, including the bad ones.
 
-- Parse common email headers plus plain-text and HTML bodies without rendering them
-- Extract HTTP(S) anchor destinations and visible link text from HTML
-- Extract URLs, public IPv4 addresses, attachment metadata, and Received headers
-- Interpret SPF, DKIM, and DMARC results while preserving the original authentication evidence
-- Look up SPF and DMARC DNS records
-- Flag Reply-To mismatches, displayed-link versus destination mismatches, suspicious URL keywords, deceptive filenames, risky extensions, and executable MIME mismatches
-- Reuse standalone URL structure and brand-impersonation checks during email triage
-- Explain each finding with its weight, confidence, evidence, false-positive caveat, and recommended next action
-- Assign an L1 disposition, priority, confidence, escalation reason, and recommended next steps
-- Check IPs with AbuseIPDB and URLs with VirusTotal when API keys are available
-- Produce text, JSON, HTML, CEF, batch-summary, and CSV output
-- Analyze a standalone URL or domain for structural tricks, typosquatting, RDAP registration signals, and TLS-certificate signals
+**Corpus:** 41 labelled emails (21 phishing, 20 benign): 7 hand-written fixtures plus 34 deterministic synthetic `.eml` files. **No real-world captures yet.** These numbers say how the rules behave on known patterns, not how the tool performs in production.
+
+| Run mode | Accuracy | Phishing recall | False-positive rate |
+| --- | --- | --- | --- |
+| Default CLI (`--auth-source unknown_capture`) | 56% | **48%** | 0% |
+
+**What the 48% means:** with default settings, authentication results (SPF/DKIM/DMARC) are recorded but not scored, because PhishGuard cannot tell whether an `Authentication-Results` header was written by your mail gateway or forged by the sender. Phishing that relies mainly on spoofed authentication is therefore under-scored. Fixing this safely is the 0.7 milestone.
+
+Earlier versions of this README reported 100% accuracy. That figure came from an evaluation in which every phishing case ran in trusted-gateway mode and every benign case did not, so the label leaked into the result. It has been withdrawn.
+
+## What it checks
+
+| Area | Checks | Scored by default |
+| --- | --- | --- |
+| Authentication | SPF, DKIM, DMARC results from `Authentication-Results` / `Received-SPF`; DKIM signature presence | Only with `--auth-source trusted_gateway` |
+| Sender | Reply-To vs From mismatch | Yes |
+| Links | HTML link text vs real destination; IP hosts, `@` tricks, deep subdomains, abused TLDs, non-standard ports, punycode; typosquat and combosquat against a curated brand list | Yes |
+| Attachments | Risky and active-content extensions, double extensions, bidirectional-text filenames, executable MIME type vs filename | Yes |
+| Enrichment (opt-in) | AbuseIPDB (IPs), VirusTotal (URLs), SPF/DMARC DNS, RDAP domain age, TLS certificate | Only with `--enrich` |
+
+Every finding carries its weight, confidence, evidence, a false-positive caveat, and a recommended next step. Output formats: text, JSON (schema `1.0`), HTML, CEF, batch summary, and CSV. A standalone `-u` mode lets an analyst pivot on a single URL or domain.
+
+## Known detection gaps
+
+These are confirmed misses or false positives, tracked on the roadmap below. Analysts should check for them manually until they are fixed.
+
+- **Attachments not marked `Content-Disposition: attachment` are not seen.** An executable sent `inline`, or with no disposition, produces no attachment finding.
+- **File type comes from the filename and MIME type only.** File signatures (magic bytes) are not checked, so an executable named `invoice.pdf` and sent as `application/octet-stream` scores 0.
+- **A direct signal can still end up `likely_benign`.** A link-text mismatch or executable type mismatch only forces escalation when the total score is HIGH.
+- **The sender domain itself is not checked for lookalikes.** `"PayPal Security" <service@paypa1.com>` with no links scores 0.
+- **HTML forms, iframes, and meta refresh are not extracted.** Only `<a href>` links are.
+- **The brand check flags some legitimate domains.** Examples include `login.microsoftonline.com`, `outlook.office365.com`, `s3.amazonaws.com`, and `purchase.com` (contains "chase"). Short brands also match ordinary words (`abc.com` → hsbc, `ups.com` → usps).
+- **A display name can hide a Reply-To mismatch.** For example: `"a@x.com <a@x.com>" <evil@y.com>`.
+- **URLs containing a backslash are analyzed as the wrong host.** For `http://evil.example\@paypal.com`, browsers go to `evil.example`, but PhishGuard analyzes `paypal.com`.
+- **One VirusTotal engine is enough to raise a high-confidence malicious finding.**
+
+### Design limitations
+
+- HTML is parsed for evidence only; PhishGuard never renders HTML, fetches content, or executes attachments.
+- DKIM signatures are detected, not cryptographically verified.
+- Authentication headers affect scoring only when the analyst declares their provenance, because forged `Authentication-Results` headers are trivial to add.
+- DNS records show what a domain publishes, not what happened at delivery.
+- Domain extraction uses a bundled public-suffix snapshot; update the dependency periodically.
+- Enrichment coverage depends on API keys, availability, and rate limits.
+- Repeated hits of one rule stay visible as evidence but score only once.
 
 ## Installation
 
@@ -174,8 +207,9 @@ Scores are decision-support signals, not proof that a message is malicious. A va
 
 The report also includes an L1 disposition. `HIGH` means escalate for review; it
 does not automatically mean malicious. `malicious_escalate` is reserved for a
-`CRITICAL` score or a direct artifact signal such as a confirmed malicious URL,
-a displayed-link mismatch, or a risky attachment/type mismatch. Other MEDIUM
+`CRITICAL` score, or a `HIGH` score that includes a direct artifact signal
+such as a confirmed malicious URL, a displayed-link mismatch, or an
+attachment type mismatch (see Known detection gaps). Other MEDIUM
 and HIGH results use `suspicious_escalate`, while LOW results use
 `likely_benign`. This keeps triage cautious until the evidence is strong enough
 to support a malicious classification.
@@ -185,73 +219,63 @@ evidence but are score-neutral by themselves. Stronger URL structure,
 brand-impersonation, authentication, attachment, or reputation findings must
 corroborate them before severity increases.
 
-## Known limitations
+## Roadmap
 
-- HTML is parsed only for anchor evidence; PhishGuard does not render HTML, fetch images, execute scripts, or interpret CSS-generated content.
-- DKIM signature presence is detected, but PhishGuard does not independently perform full DKIM cryptographic verification.
-- Authentication-Results headers are reported as message evidence, with an explicit `source_context`. They affect scoring only when `--auth-source trusted_gateway` is supplied; `unknown_capture` and `untrusted_capture` preserve the evidence without trusting attacker-controlled authentication claims.
-- DNS records show what a sender domain publishes; they do not independently prove a message passed authentication during delivery.
-- URL structure and brand-impersonation findings are integrated into email URL scoring; RDAP and TLS checks remain explicit-enrichment-only.
-- Registrable-domain extraction uses a bundled public-suffix snapshot; update the dependency periodically as the suffix list evolves.
-- Threat-intelligence coverage depends on API availability, rate limits, and configured keys.
-- Reports should be reviewed before being shared externally.
-- Repeated instances of the same detection rule remain visible as separate
-  evidence, but only the first instance contributes to the risk score so
-  duplicated indicators cannot inflate severity.
+Each milestone ends on a **measurable exit criterion**, not a feature checklist. A milestone is done when its numbers hold on the evaluation corpus, not when its code is merged.
 
-## Triage-first roadmap
+### Shipped (0.3 – 0.5)
 
-### 0.3 — Reliability, safety, and project baseline
+Bounded parsing of hostile input, offline-by-default operation, safe HTML/CEF/CSV/terminal output, CI on Python 3.10–3.14 with dependency audit and static security checks, HTML link extraction, link-text mismatch detection, attachment filename heuristics, public-suffix-aware domain parsing, unified URL and email findings, per-rule score de-duplication, L1 disposition and priority, JSON schema `1.0`, and a synthetic offline corpus.
 
-- [x] Make local development and testing reproducible
-- [x] Add automated CI for tests and quality checks
-- [x] Define supported Python versions in one place
-- [x] Make output handling safe for untrusted email content
-- [x] Make IOC ordering deterministic
-- [x] Clarify and standardize offline versus external-enrichment behavior
-- [x] Update documentation and remove stale references
+### 0.6: Honest baseline (next)
 
-### 0.3.1 — Secure core
+- [ ] Evaluation runs every case in default CLI mode and reports it alongside any trusted-gateway run
+- [ ] Remove the `accuracy == 1.0` test assertion; enforce a minimum recall floor instead
+- [ ] Regression tests for every confirmed gap above (written failing first)
 
-- [x] Keep analysis offline by default; require explicit enrichment consent
-- [x] Enforce limits for hostile message and batch inputs
-- [x] Protect HTML, CEF, CSV, and terminal output from untrusted content
-- [x] Make network access impossible in ordinary tests
-- [x] Add dependency auditing, static security checks, and update automation
+**Exit criterion:** default-mode metrics are reproducible with one command and published in this README.
 
-### 0.4 — Stronger email evidence
+### 0.7: No silent misses
 
-- [x] Extract URLs from HTML email bodies
-- [x] Detect display-text and link-destination mismatches
-- [x] Improve authentication-result interpretation
-- [x] Expand attachment metadata and risky-file heuristics
-- [x] Add representative benign, suspicious, and malicious test fixtures
-- [x] Improve explainability for each finding
+- [ ] `--trusted-authserv-id`: trust only `Authentication-Results` stamped by your own receiving servers (RFC 8601 §5)
+- [ ] Detect attachments regardless of `Content-Disposition`; check file signatures; report SHA-256 per attachment
+- [ ] Any direct malicious signal escalates to at least `suspicious_escalate`
 
-### 0.5 — Unified URL and email analysis
+**Exit criterion:** default-mode phishing recall ≥ 85% on the corpus with false-positive rate unchanged.
 
-- [x] Use public-suffix-aware domain parsing
-- [x] Integrate URL structure and brand-impersonation findings into email triage
-- [x] Normalize URL and email findings around common IDs, messages, evidence, and actions
-- [x] Prevent duplicate findings and inflated scores
-- [x] Define safe limits for network enrichment during batch analysis
+### 0.8: Analyst trust
 
-### 0.6 — Analyst workflow improvements
+- [ ] Brand-owned domain allowlist, stricter edit distance, whole-token combosquat matching
+- [ ] Address-parser-based Reply-To comparison; WHATWG-style backslash handling in URLs
+- [ ] Sender-domain lookalike and display-name brand-spoof checks
+- [ ] Extract `form[action]`, `iframe`, `meta refresh`, `data:` / `javascript:` URLs; flag password inputs
+- [ ] VirusTotal finding requires a minimum engine count
 
-- [x] Improve batch prioritization and analyst summaries
-- [x] Stabilize JSON and CEF schemas for downstream systems (JSON schema version `1.0` is now declared)
-- [x] Add clear recommended next steps to reports
-- [x] Establish an offline calibration corpus; real sanitized SOC captures remain the next validation requirement
+**Exit criterion:** false-positive rate ≤ 5% on a benign set of real brand notifications (Microsoft 365, Google, Amazon, banks), recall ≥ 85% held.
 
-### Deferred
+### 0.9: Real-world validation
 
-These are not active implementation commitments until the triage core is reliable and validated:
+- [ ] 50+ sanitized real reported-phishing and benign captures added to the corpus (synthetic cases remain as regression tests)
+- [ ] Metrics reported separately for real and synthetic sources
 
-- Browser extension
-- Machine-learning scoring
-- Public REST API
-- Community reporting
-- Enterprise dashboards and monitoring
+**Exit criterion:** recall and false-positive targets from 0.7–0.8 hold on the real-capture set.
+
+### 1.0: Stable for SOC workflows
+
+- [ ] JSON and CEF schemas frozen and documented; breaking changes require a major version
+- [ ] Published detection metrics in every release notes entry
+
+**Exit criterion:** two consecutive releases meet the 0.8 targets without schema changes.
+
+### After 1.0 (analyst-workflow candidates, not commitments)
+
+- Outlook `.msg` input
+- STIX 2.1 / MISP export of extracted IOCs
+- A stable Python API for SOAR playbooks
+
+### Out of scope
+
+PhishGuard will not become a consumer phishing checker, browser extension, community reporting platform, or real-time mail-blocking product. Machine-learning scoring is out of scope until the rule-based engine is validated on real captures, and would only ever be added as an explainable, assistive signal.
 
 ## Project structure
 
