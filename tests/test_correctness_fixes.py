@@ -131,3 +131,31 @@ def test_a4_dmarc_record_split_across_strings_is_joined(monkeypatch):
 
     assert result["policy"]["subdomain_policy"] == "reject"
     assert result["policy"]["report_uri"] == "mailto:d@example.com"
+
+
+# --- A5: terminal output lets C1 and bidi controls through -------------------
+
+def test_a5_bidi_override_is_escaped():
+    from phishguard.cli import _safe_terminal_text
+
+    # U+202E RIGHT-TO-LEFT OVERRIDE would make "moc.live" render as "evil.com".
+    assert _safe_terminal_text("moc.‮live‬") == "moc.\\u202elive\\u202c"
+
+
+def test_a5_c1_control_is_escaped():
+    from phishguard.cli import _safe_terminal_text
+
+    # U+009B is the 8-bit CSI, which some terminals treat like ESC [.
+    assert _safe_terminal_text("x\x9b31my") == "x\\x9b31my"
+
+
+def test_a5_zero_width_characters_are_visible():
+    from phishguard.cli import _safe_terminal_text
+
+    assert _safe_terminal_text("pay​pal") == "pay\\u200bpal"
+
+
+def test_a5_ordinary_unicode_is_unchanged():
+    from phishguard.cli import _safe_terminal_text
+
+    assert _safe_terminal_text("Ünïcødé – ok") == "Ünïcødé – ok"

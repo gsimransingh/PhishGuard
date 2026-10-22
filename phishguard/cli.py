@@ -11,6 +11,7 @@ import sys
 import os
 import csv
 import secrets
+import unicodedata
 from datetime import datetime, timezone
 
 from phishguard.email_parser import parse_eml # type: ignore
@@ -90,8 +91,13 @@ def _safe_terminal_text(value: object) -> str:
             escaped.append("\\r")
         elif character == "\t":
             escaped.append("\\t")
-        elif ord(character) < 32 or ord(character) == 127:
-            escaped.append(f"\\x{ord(character):02x}")
+        elif unicodedata.category(character) in ("Cc", "Cf"):
+            # Cc: C0/C1 controls (incl. ESC, DEL, 8-bit CSI U+009B).
+            # Cf: invisible format characters, incl. bidi overrides such as
+            # U+202E that can make "moc.live" display as "evil.com", and
+            # zero-width characters used to split brand names.
+            code_point = ord(character)
+            escaped.append(f"\\x{code_point:02x}" if code_point <= 0xFF else f"\\u{code_point:04x}")
         else:
             escaped.append(character)
     return "".join(escaped)
