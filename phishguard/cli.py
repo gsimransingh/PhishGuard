@@ -401,6 +401,7 @@ def run_single(args: argparse.Namespace):
             run_intel=args.enrich,
             submit_unknown_urls=getattr(args, "submit_unknown_urls", False),
             auth_source=getattr(args, "auth_source", "unknown_capture"),
+            trusted_authserv_ids=tuple(getattr(args, "trusted_authserv_id", None) or ()),
         ) # type: ignore
     except EmailLimitError as error:
         print(f"[ERROR] Input rejected: {_safe_terminal_text(error)}", file=sys.stderr)
@@ -505,6 +506,7 @@ def run_batch(args: argparse.Namespace):
                 run_intel=args.enrich,
                 submit_unknown_urls=getattr(args, "submit_unknown_urls", False),
                 auth_source=getattr(args, "auth_source", "unknown_capture"),
+            trusted_authserv_ids=tuple(getattr(args, "trusted_authserv_id", None) or ()),
             ) # type: ignore
             results.append(report) # type: ignore
 
@@ -620,6 +622,17 @@ Examples:
         choices=["unknown_capture", "trusted_gateway", "untrusted_capture"],
         default="unknown_capture",
         help="Provenance of authentication headers in the analyzed message",
+    )
+
+    parser.add_argument(
+        "--trusted-authserv-id",
+        action="append",
+        metavar="HOST",
+        help=(
+            "Hostname your receiving mail server writes at the start of "
+            "Authentication-Results (e.g. mx.example.com). Only the topmost header "
+            "from these hosts is trusted for SPF/DKIM/DMARC scoring. Repeatable."
+        ),
     )
 
     color_group = parser.add_mutually_exclusive_group()

@@ -27,6 +27,7 @@ def analyze(
     run_intel: bool = False,
     submit_unknown_urls: bool = False,
     auth_source: str = "unknown_capture",
+    trusted_authserv_ids: tuple[str, ...] = (),
 ) -> dict:
     """
     Build a structured alert report from parsed email data.
@@ -36,6 +37,10 @@ def analyze(
         file_path:  Path to the original .eml file (used for display only)
         run_intel:  If True, perform external DNS and threat-intelligence
                     enrichment. Defaults to False for fully offline analysis.
+        trusted_authserv_ids: Hostnames your own receiving servers write as
+                    the authserv-id in Authentication-Results (e.g.
+                    "mx.example.com"). When given, only the topmost header from
+                    one of them is trusted for scoring (RFC 8601 section 5).
 
     Returns:
         A fully structured report dict ready for text/JSON/HTML/CEF output.
@@ -75,8 +80,11 @@ def analyze(
         score += score_contribution
 
     # --- SPF / DKIM / DMARC interpretation ---
-    auth_trusted = auth_source == "trusted_gateway"
-    auth_evidence = _interpret_authentication(parsed, trusted=auth_trusted)
+    auth_evidence = _interpret_authentication(
+        parsed,
+        trusted=auth_source == "trusted_gateway",
+        trusted_authserv_ids=trusted_authserv_ids,
+    )
     spf_status = auth_evidence["spf"]["score_status"]
     dkim_status = auth_evidence["dkim"]["score_status"]
     dmarc_status = auth_evidence["dmarc"]["score_status"]
@@ -330,7 +338,10 @@ def analyze(
             "dkim":  "present" if parsed["dkim"] else "missing",
             "dmarc": parsed["dmarc"],
         },
-        "authentication_evidence": {**auth_evidence, "source_context": auth_source},
+        "authentication_evidence": {
+            **auth_evidence,
+            "source_context": "trusted_authserv_id" if auth_evidence["trusted_authserv_ids"] else auth_source,
+        },
         "dns_validation": dns_results,
         "iocs": {
             "urls":        parsed["urls"],
@@ -424,10 +435,47 @@ def _extract_email_address(header_value: str) -> str:
     return address.strip().lower()
 
 
-def _interpret_authentication(parsed: dict, trusted: bool = False) -> dict:
-    """Interpret authentication results and gate scoring on trusted provenance."""
-    authentication_headers = parsed.get("authentication_results") or []
-    closest_result = str(authentication_headers[0]) if authentication_headers else str(parsed.get("dmarc", ""))
+def _authserv_id(header_value: object) -> str:
+    """Return the authserv-id of an Authentication-Results header.
+
+    RFC 8601: the header starts with the authserv-id, optionally followed by
+    a version number, then ';'. "mx.example.com 1; spf=pass" -> "mx.example.com".
+    """
+    head = str(header_value).split(";", 1)[0].strip()
+    return head.split()[0].lower().rstrip(".") if head else ""
+
+
+def _interpret_authentication(
+    parsed: dict,
+    trusted: bool = False,
+    trusted_authserv_ids: tuple[str, ...] = (),
+) -> dict:
+    """Interpret authentication results and gate scoring on trusted provenance.
+
+    Anyone can write an Authentication-Results header, so a result is only
+    worth scoring when we know our own receiving server wrote it. With
+    ``trusted_authserv_ids`` configured, the topmost header carrying one of
+    those ids is selected and trusted: the receiving gateway adds its header
+    above anything the sender supplied. If none matches, nothing is trusted
+    and Received-SPF is ignored too, since its origin cannot be attributed.
+    Without configured ids, ``trusted`` (the blanket trusted_gateway mode)
+    decides, as before.
+    """
+    authentication_headers = [str(header) for header in (parsed.get("authentication_results") or [])]
+    wanted_ids = {
+        value.strip().lower().rstrip(".") for value in trusted_authserv_ids if value and value.strip()
+    }
+    matched_authserv_id = None
+    allow_received_spf = True
+    if wanted_ids:
+        own_headers = [header for header in authentication_headers if _authserv_id(header) in wanted_ids]
+        trusted = bool(own_headers)
+        matched_authserv_id = _authserv_id(own_headers[0]) if own_headers else None
+        authentication_headers = own_headers[:1]
+        allow_received_spf = False
+        closest_result = authentication_headers[0] if authentication_headers else ""
+    else:
+        closest_result = authentication_headers[0] if authentication_headers else str(parsed.get("dmarc", ""))
 
     def result_for(mechanism: str) -> tuple[str, str]:
         match = re.search(
@@ -440,7 +488,7 @@ def _interpret_authentication(parsed: dict, trusted: bool = False) -> dict:
         return "", ""
 
     spf_status, spf_source = result_for("spf")
-    if not spf_status:
+    if not spf_status and allow_received_spf:
         received_spf = str(parsed.get("spf", "")).strip()
         match = re.match(
             r"(pass|fail|softfail|neutral|none|temperror|permerror)",
@@ -482,11 +530,36 @@ def _interpret_authentication(parsed: dict, trusted: bool = False) -> dict:
             dmarc_status or "missing", dmarc_source,
             "Domain-alignment evaluation recorded by the receiving system.",
         ),
-        "caution": (
-            "Authentication-Results is trusted only when added by the analyst's "
-            "known receiving infrastructure; PhishGuard cannot establish that trust boundary."
-        ),
+        "trusted_authserv_ids": sorted(wanted_ids),
+        "matched_authserv_id": matched_authserv_id,
+        "caution": _authentication_caution(wanted_ids, matched_authserv_id, trusted),
     }
+
+
+def _authentication_caution(wanted_ids: set[str], matched: Optional[str], trusted: bool) -> str:
+    """Explain to the analyst why authentication was or was not scored."""
+    if wanted_ids and matched:
+        return (
+            f"Scored from the Authentication-Results header written by {matched}, "
+            "a configured receiving server. This relies on that server removing "
+            "inbound headers that claim its own authserv-id (RFC 8601 section 5)."
+        )
+    if wanted_ids:
+        return (
+            "No Authentication-Results header from a configured receiving server "
+            f"({', '.join(sorted(wanted_ids))}) was found, so SPF/DKIM/DMARC were not "
+            "scored. The message may not have passed through that server, or the "
+            "capture may have dropped the header."
+        )
+    if trusted:
+        return (
+            "Authentication-Results was trusted for scoring because the analyst "
+            "declared the capture came from a trusted gateway (--auth-source trusted_gateway)."
+        )
+    return (
+        "Authentication-Results is trusted only when added by the analyst's "
+        "known receiving infrastructure; PhishGuard cannot establish that trust boundary."
+    )
 
 
 def _normalized_comparison_domain(value: str) -> str:
