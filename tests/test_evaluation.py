@@ -44,3 +44,32 @@ def test_synthetic_corpus_is_backed_by_eml_files():
     assert all((repo_root / case["path"]).is_file() for case in cases)
     assert all(case["path"].endswith(".eml") for case in cases)
     assert {case["source_type"] for case in cases} == {"synthetic_generated_eml"}
+
+
+# Ratchet for the headline metric. Raise these floors whenever a fix lands;
+# never lower them to make a change pass. Values measured 2026-10-22 on the
+# 41-case corpus (7 fixtures + 34 synthetic) in default CLI mode.
+DEFAULT_MODE_RECALL_FLOOR = 10 / 21
+DEFAULT_MODE_MAX_FALSE_POSITIVE_RATE = 0.0
+
+
+def test_default_cli_mode_does_not_regress():
+    """Measure what an analyst gets with no flags, not the per-case labels.
+
+    Per-case auth_source labels can leak the expected answer: if only phishing
+    cases are marked trusted_gateway, auth failures score only on phishing.
+    Forcing the CLI default for every case removes that leak.
+    """
+    import json
+
+    from evaluation.run import DEFAULT_CLI_AUTH_SOURCE
+
+    repo_root = Path(__file__).parent.parent
+    cases = json.loads((repo_root / "evaluation" / "cases.json").read_text(encoding="utf-8"))
+    cases += build_synthetic_cases()
+
+    report = evaluate_cases(repo_root, cases, auth_source_override=DEFAULT_CLI_AUTH_SOURCE)
+
+    assert {result["auth_source"] for result in report["results"]} == {DEFAULT_CLI_AUTH_SOURCE}
+    assert report["metrics"]["recall"] >= DEFAULT_MODE_RECALL_FLOOR
+    assert report["metrics"]["false_positive_rate"] <= DEFAULT_MODE_MAX_FALSE_POSITIVE_RATE

@@ -102,6 +102,12 @@ Use `--no-banner` for scheduled jobs that do not need the startup banner.
 
 ## Offline evaluation
 
+Headline metrics (default CLI mode) and every miss, on the full corpus:
+
+```bash
+python -m evaluation.run --include-synthetic --summary
+```
+
 Run the seven checked-in email fixtures:
 
 ```bash
