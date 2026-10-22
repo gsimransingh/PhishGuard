@@ -3,6 +3,13 @@
 Each test was written to fail against the pre-fix code and pass after it.
 """
 
+import json
+import shutil
+import sys
+from pathlib import Path
+
+import pytest
+
 from phishguard.email_parser import _extract_urls
 
 
@@ -162,13 +169,6 @@ def test_a5_ordinary_unicode_is_unchanged():
 
 
 # --- A6: batch mode silently ignores -o -----------------------------------
-
-import json
-import shutil
-import sys
-from pathlib import Path
-
-import pytest
 
 SAMPLES = Path(__file__).parent.parent / "samples"
 
