@@ -7,6 +7,30 @@ The evaluation manifest defines the current SOC L1 disposition contract:
 - `malicious_escalate`
 - `insufficient_evidence`
 
+## Headline metric: default CLI mode
+
+Every report now includes a `default_cli_mode` block that scores **every case
+with `auth_source=unknown_capture`**, which is what an analyst gets when
+running the CLI with no flags. Treat this as the headline number. The
+per-case `auth_source` labels are still reported, but they can leak the
+expected answer: if only phishing cases are labelled `trusted_gateway`, only
+phishing cases get credit for authentication failures.
+
+Quick summary, including every default-mode miss:
+
+```powershell
+python -m evaluation.run --include-synthetic --summary
+```
+
+`tests/test_evaluation.py` enforces a recall floor and false-positive ceiling
+for default mode. Raise the floor whenever a fix lands; never lower it.
+
+Confirmed detection gaps are tracked as `xfail(strict=True)` tests in
+`tests/test_known_gaps.py`. When a fix makes one pass, strict mode fails the
+suite until the marker is removed, so the list stays honest.
+
+## Full report
+
 Run the offline baseline from the repository root:
 
 ```powershell

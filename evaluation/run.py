@@ -13,7 +13,21 @@ from phishguard.triage import DISPOSITIONS
 ESCALATING = {"suspicious_escalate", "malicious_escalate"}
 
 
-def evaluate_cases(repo_root: Path, cases: list[dict]) -> dict:
+DEFAULT_CLI_AUTH_SOURCE = "unknown_capture"
+
+
+def evaluate_cases(
+    repo_root: Path,
+    cases: list[dict],
+    auth_source_override: str | None = None,
+) -> dict:
+    """Score every case and compute disposition metrics.
+
+    ``auth_source_override`` forces one provenance for every case. Use
+    ``DEFAULT_CLI_AUTH_SOURCE`` to measure what an analyst gets when running
+    the CLI without flags; per-case labels alone can leak the expected answer
+    (e.g. if only phishing cases are marked ``trusted_gateway``).
+    """
     results = []
     for case in cases:
         required = {"id", "category", "expected_disposition"}
@@ -39,7 +53,8 @@ def evaluate_cases(repo_root: Path, cases: list[dict]) -> dict:
             "source_type",
             "parsed_synthetic" if "parsed" in case else "checked_in_fixture",
         )
-        report = analyze(parsed, str(path), auth_source=case.get("auth_source", "unknown_capture"))
+        auth_source = auth_source_override or case.get("auth_source", DEFAULT_CLI_AUTH_SOURCE)
+        report = analyze(parsed, str(path), auth_source=auth_source)
         results.append({
             "id": case["id"],
             "category": case["category"],
@@ -47,7 +62,7 @@ def evaluate_cases(repo_root: Path, cases: list[dict]) -> dict:
             "predicted_disposition": report["disposition"],
             "risk_level": report["risk_level"],
             "risk_score": report["risk_score"],
-            "auth_source": case.get("auth_source", "unknown_capture"),
+            "auth_source": auth_source,
             "source_type": source_type,
             "finding_checks": sorted({finding["check"] for finding in report["findings"]}),
             "correct": report["disposition"] == case["expected_disposition"],
@@ -135,6 +150,11 @@ def main() -> None:
         action="store_true",
         help="Include deterministic generated .eml calibration fixtures",
     )
+    parser.add_argument(
+        "--summary",
+        action="store_true",
+        help="Print a short human-readable summary instead of the full JSON report",
+    )
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parent.parent
@@ -143,10 +163,42 @@ def main() -> None:
         from evaluation.synthetic_cases import build_synthetic_cases
         cases.extend(build_synthetic_cases())
     report = evaluate_cases(repo_root, cases)
+    default_mode = evaluate_cases(repo_root, cases, auth_source_override=DEFAULT_CLI_AUTH_SOURCE)
+    report["default_cli_mode"] = {
+        "auth_source": DEFAULT_CLI_AUTH_SOURCE,
+        "description": "Every case scored as the CLI scores it with no flags. This is the headline metric.",
+        "metrics": default_mode["metrics"],
+        "confusion_matrix": default_mode["confusion_matrix"],
+        "misses": [
+            {key: result[key] for key in ("id", "expected_disposition", "predicted_disposition", "risk_score")}
+            for result in default_mode["results"]
+            if not result["correct"]
+        ],
+    }
     rendered = json.dumps(report, indent=2)
     if args.output:
         args.output.write_text(rendered + "\n", encoding="utf-8")
-    print(rendered)
+    if args.summary:
+        _print_summary(report)
+    else:
+        print(rendered)
+
+
+def _print_summary(report: dict) -> None:
+    def line(label: str, metrics: dict) -> str:
+        return (
+            f"{label:<28} accuracy={metrics['accuracy']:.0%}  recall={metrics['recall']:.0%}  "
+            f"precision={metrics['precision']:.0%}  FPR={metrics['false_positive_rate']:.0%}"
+        )
+
+    print(f"cases: {report['dataset']['cases']}")
+    print(line("default CLI mode (headline)", report["default_cli_mode"]["metrics"]))
+    print(line("per-case auth labels", report["metrics"]))
+    for miss in report["default_cli_mode"]["misses"]:
+        print(
+            f"  miss: {miss['id']:<40} expected={miss['expected_disposition']:<20} "
+            f"got={miss['predicted_disposition']} (score {miss['risk_score']})"
+        )
 
 
 if __name__ == "__main__":
