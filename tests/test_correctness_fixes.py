@@ -74,3 +74,17 @@ def test_a2_non_list_rdap_status_is_ignored(monkeypatch):
     report = analyze_url("example.com", run_intel=True)
 
     assert report["domain_registration"]["domain_status"] == []
+
+
+# --- A3: DMARC sp defaults to "none" instead of inheriting p -----------------
+
+def test_a3_missing_sp_inherits_p():
+    from phishguard.dns_validator import _parse_dmarc_policy
+
+    assert _parse_dmarc_policy("v=DMARC1; p=reject")["subdomain_policy"] == "reject"
+
+
+def test_a3_explicit_sp_is_kept():
+    from phishguard.dns_validator import _parse_dmarc_policy
+
+    assert _parse_dmarc_policy("v=DMARC1; p=reject; sp=none")["subdomain_policy"] == "none"

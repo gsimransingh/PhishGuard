@@ -116,9 +116,11 @@ def _parse_dmarc_policy(record: str) -> dict[str, str]:
         if '=' in part:
             key, _, value = part.partition('=')
             tags[key.strip()] = value.strip()
+    policy = tags.get("p", "none")
     return {
-        "policy":           tags.get("p", "none"),
-        "subdomain_policy": tags.get("sp", "none"),
+        "policy":           policy,
+        # RFC 7489 section 6.3: when sp is absent, subdomains use p.
+        "subdomain_policy": tags.get("sp", policy),
         "report_uri":       tags.get("rua", ""),
         "pct":              tags.get("pct", "100"),
     }
