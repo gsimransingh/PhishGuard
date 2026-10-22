@@ -73,3 +73,31 @@ def test_default_cli_mode_does_not_regress():
     assert {result["auth_source"] for result in report["results"]} == {DEFAULT_CLI_AUTH_SOURCE}
     assert report["metrics"]["recall"] >= DEFAULT_MODE_RECALL_FLOOR
     assert report["metrics"]["false_positive_rate"] <= DEFAULT_MODE_MAX_FALSE_POSITIVE_RATE
+
+
+# Headline ratchet: configured mode (analyst has set their receiving servers).
+# Measured 2026-10-22 after 0.7 PRs 1-4: 21/21 recall, 0/20 false positives on
+# the SYNTHETIC corpus. Synthetic cases were written for these rules, so this
+# is a regression guard, not a real-world accuracy claim (see README, 0.9).
+CONFIGURED_MODE_RECALL_FLOOR = 21 / 21
+CONFIGURED_MODE_MAX_FALSE_POSITIVE_RATE = 0.0
+
+
+def test_configured_mode_does_not_regress():
+    import json
+
+    from evaluation.run import CORPUS_TRUSTED_AUTHSERV_IDS, DEFAULT_CLI_AUTH_SOURCE
+
+    repo_root = Path(__file__).parent.parent
+    cases = json.loads((repo_root / "evaluation" / "cases.json").read_text(encoding="utf-8"))
+    cases += build_synthetic_cases()
+
+    report = evaluate_cases(
+        repo_root,
+        cases,
+        auth_source_override=DEFAULT_CLI_AUTH_SOURCE,
+        trusted_authserv_ids=CORPUS_TRUSTED_AUTHSERV_IDS,
+    )
+
+    assert report["metrics"]["recall"] >= CONFIGURED_MODE_RECALL_FLOOR
+    assert report["metrics"]["false_positive_rate"] <= CONFIGURED_MODE_MAX_FALSE_POSITIVE_RATE

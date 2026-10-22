@@ -1,9 +1,11 @@
 """--trusted-authserv-id: trust only our own Authentication-Results (RFC 8601 section 5)."""
 
 import sys
+from argparse import Namespace
 
 import pytest
 
+from phishguard import cli
 from phishguard.analyzer import _authserv_id, analyze
 from phishguard.email_parser import parse_eml
 
@@ -110,3 +112,64 @@ def test_cli_flag_is_repeatable_and_reaches_analysis(tmp_path, monkeypatch, caps
     report = json.loads(capsys.readouterr().out)
     assert report["authentication_evidence"]["trusted_authserv_ids"] == ["backup-mx.example.com", OUR_MX]
     assert report["authentication_evidence"]["matched_authserv_id"] == OUR_MX
+
+
+# --- PR4: persistent configuration and the unconfigured warning ------------
+
+
+
+@pytest.mark.parametrize("flag, env, expected", [
+    (None, "", ()),
+    (None, "mx.example.com", ("mx.example.com",)),
+    (None, " mx.example.com , backup.example.com ,, ", ("mx.example.com", "backup.example.com")),
+    (["cli.example.com"], "mx.example.com", ("cli.example.com",)),  # flag overrides env
+])
+def test_trusted_ids_resolve_from_flag_then_environment(monkeypatch, flag, env, expected):
+    monkeypatch.setenv(cli.TRUSTED_AUTHSERV_IDS_ENV, env)
+    assert cli._resolve_trusted_authserv_ids(Namespace(trusted_authserv_id=flag)) == expected
+
+
+def _run_single(monkeypatch, tmp_path, *extra):
+    path = tmp_path / "msg.eml"
+    _report(tmp_path, [FAILS])  # writes msg.eml
+    monkeypatch.setattr(sys, "argv", ["phishguard", "--no-banner", "--no-color", "-f", str(path), *extra])
+    cli.main()
+
+
+def test_unconfigured_run_warns_and_report_says_scoring_is_off(monkeypatch, tmp_path, capsys):
+    monkeypatch.delenv(cli.TRUSTED_AUTHSERV_IDS_ENV, raising=False)
+    _run_single(monkeypatch, tmp_path)
+
+    captured = capsys.readouterr()
+    assert "not scored" in captured.err
+    assert "Auth score : OFF (not configured" in captured.out
+
+
+def test_environment_configuration_scores_and_silences_warning(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv(cli.TRUSTED_AUTHSERV_IDS_ENV, OUR_MX)
+    _run_single(monkeypatch, tmp_path, "-o", "json")
+
+    captured = capsys.readouterr()
+    assert "not scored" not in captured.err
+    report = __import__("json").loads(captured.out)
+    assert report["authentication_evidence"]["scoring_mode"] == "trusted_authserv_id"
+    assert "dmarc_failure" in {finding["check"] for finding in report["findings"]}
+
+
+@pytest.mark.parametrize("kwargs, headers, expected", [
+    ({}, [FAILS], "disabled"),
+    ({"auth_source": "trusted_gateway"}, [FAILS], "trusted_gateway"),
+    ({"trusted_authserv_ids": (OUR_MX,)}, [FAILS], "trusted_authserv_id"),
+    ({"trusted_authserv_ids": (OUR_MX,)}, ["other.example; spf=fail"], "trusted_authserv_id_no_match"),
+])
+def test_scoring_mode_is_reported(tmp_path, kwargs, headers, expected):
+    assert _report(tmp_path, headers, **kwargs)["authentication_evidence"]["scoring_mode"] == expected
+
+
+def test_html_report_states_authentication_scoring(tmp_path):
+    from phishguard.report_generator import generate_html_report
+
+    html = generate_html_report(_report(tmp_path, [FAILS]))
+
+    assert "Authentication scoring:</strong> disabled" in html
+    assert "NOT scored" in html

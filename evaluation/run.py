@@ -15,11 +15,17 @@ ESCALATING = {"suspicious_escalate", "malicious_escalate"}
 
 DEFAULT_CLI_AUTH_SOURCE = "unknown_capture"
 
+# The receiving servers that stamp Authentication-Results in this corpus.
+# This is the evaluation equivalent of an analyst setting
+# PHISHGUARD_TRUSTED_AUTHSERV_IDS for their own organisation.
+CORPUS_TRUSTED_AUTHSERV_IDS = ("mx.example.com", "mx.company.com")
+
 
 def evaluate_cases(
     repo_root: Path,
     cases: list[dict],
     auth_source_override: str | None = None,
+    trusted_authserv_ids: tuple[str, ...] = (),
 ) -> dict:
     """Score every case and compute disposition metrics.
 
@@ -54,7 +60,12 @@ def evaluate_cases(
             "parsed_synthetic" if "parsed" in case else "checked_in_fixture",
         )
         auth_source = auth_source_override or case.get("auth_source", DEFAULT_CLI_AUTH_SOURCE)
-        report = analyze(parsed, str(path), auth_source=auth_source)
+        report = analyze(
+            parsed,
+            str(path),
+            auth_source=auth_source,
+            trusted_authserv_ids=trusted_authserv_ids,
+        )
         results.append({
             "id": case["id"],
             "category": case["category"],
@@ -163,18 +174,39 @@ def main() -> None:
         from evaluation.synthetic_cases import build_synthetic_cases
         cases.extend(build_synthetic_cases())
     report = evaluate_cases(repo_root, cases)
-    default_mode = evaluate_cases(repo_root, cases, auth_source_override=DEFAULT_CLI_AUTH_SOURCE)
-    report["default_cli_mode"] = {
-        "auth_source": DEFAULT_CLI_AUTH_SOURCE,
-        "description": "Every case scored as the CLI scores it with no flags. This is the headline metric.",
-        "metrics": default_mode["metrics"],
-        "confusion_matrix": default_mode["confusion_matrix"],
-        "misses": [
-            {key: result[key] for key in ("id", "expected_disposition", "predicted_disposition", "risk_score")}
-            for result in default_mode["results"]
-            if not result["correct"]
-        ],
-    }
+    def mode_block(mode_report: dict, description: str, **settings) -> dict:
+        return {
+            **settings,
+            "description": description,
+            "metrics": mode_report["metrics"],
+            "confusion_matrix": mode_report["confusion_matrix"],
+            "misses": [
+                {key: result[key] for key in ("id", "expected_disposition", "predicted_disposition", "risk_score")}
+                for result in mode_report["results"]
+                if not result["correct"]
+            ],
+        }
+
+    configured = evaluate_cases(
+        repo_root, cases,
+        auth_source_override=DEFAULT_CLI_AUTH_SOURCE,
+        trusted_authserv_ids=CORPUS_TRUSTED_AUTHSERV_IDS,
+    )
+    report["configured_mode"] = mode_block(
+        configured,
+        "Headline. Every case scored as a SOC would run the CLI after setting "
+        "PHISHGUARD_TRUSTED_AUTHSERV_IDS to its own receiving servers.",
+        auth_source=DEFAULT_CLI_AUTH_SOURCE,
+        trusted_authserv_ids=list(CORPUS_TRUSTED_AUTHSERV_IDS),
+    )
+    unconfigured = evaluate_cases(repo_root, cases, auth_source_override=DEFAULT_CLI_AUTH_SOURCE)
+    report["default_cli_mode"] = mode_block(
+        unconfigured,
+        "Every case scored with no configuration at all: authentication results "
+        "are recorded but never scored. Published so the cost of skipping setup is visible.",
+        auth_source=DEFAULT_CLI_AUTH_SOURCE,
+        trusted_authserv_ids=[],
+    )
     rendered = json.dumps(report, indent=2)
     if args.output:
         args.output.write_text(rendered + "\n", encoding="utf-8")
@@ -192,13 +224,15 @@ def _print_summary(report: dict) -> None:
         )
 
     print(f"cases: {report['dataset']['cases']}")
-    print(line("default CLI mode (headline)", report["default_cli_mode"]["metrics"]))
+    print(line("configured (headline)", report["configured_mode"]["metrics"]))
+    print(line("unconfigured", report["default_cli_mode"]["metrics"]))
     print(line("per-case auth labels", report["metrics"]))
-    for miss in report["default_cli_mode"]["misses"]:
-        print(
-            f"  miss: {miss['id']:<40} expected={miss['expected_disposition']:<20} "
-            f"got={miss['predicted_disposition']} (score {miss['risk_score']})"
-        )
+    for label, key in (("configured", "configured_mode"), ("unconfigured", "default_cli_mode")):
+        for miss in report[key]["misses"]:
+            print(
+                f"  {label} miss: {miss['id']:<36} expected={miss['expected_disposition']:<20} "
+                f"got={miss['predicted_disposition']} (score {miss['risk_score']})"
+            )
 
 
 if __name__ == "__main__":

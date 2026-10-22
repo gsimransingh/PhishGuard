@@ -532,8 +532,24 @@ def _interpret_authentication(
         ),
         "trusted_authserv_ids": sorted(wanted_ids),
         "matched_authserv_id": matched_authserv_id,
+        "scoring_mode": _authentication_scoring_mode(wanted_ids, matched_authserv_id, trusted),
         "caution": _authentication_caution(wanted_ids, matched_authserv_id, trusted),
     }
+
+
+AUTH_SCORING_MODES = (
+    "trusted_authserv_id",           # scored from our own server's header
+    "trusted_authserv_id_no_match",  # configured, but no header from our server
+    "trusted_gateway",               # blanket trust declared by the analyst
+    "disabled",                      # not configured: recorded, not scored
+)
+
+
+def _authentication_scoring_mode(wanted_ids: set[str], matched: Optional[str], trusted: bool) -> str:
+    """Summarise in one stable token whether SPF/DKIM/DMARC affected the score."""
+    if wanted_ids:
+        return "trusted_authserv_id" if matched else "trusted_authserv_id_no_match"
+    return "trusted_gateway" if trusted else "disabled"
 
 
 def _authentication_caution(wanted_ids: set[str], matched: Optional[str], trusted: bool) -> str:
@@ -557,8 +573,10 @@ def _authentication_caution(wanted_ids: set[str], matched: Optional[str], truste
             "declared the capture came from a trusted gateway (--auth-source trusted_gateway)."
         )
     return (
-        "Authentication-Results is trusted only when added by the analyst's "
-        "known receiving infrastructure; PhishGuard cannot establish that trust boundary."
+        "SPF/DKIM/DMARC were recorded but NOT scored: PhishGuard does not know which "
+        "receiving server to trust, and Authentication-Results headers are easy to forge. "
+        "Set PHISHGUARD_TRUSTED_AUTHSERV_IDS (or --trusted-authserv-id) to your mail "
+        "server's authserv-id, e.g. mx.example.com."
     )
 
 
