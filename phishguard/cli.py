@@ -371,6 +371,21 @@ def export_csv(results: list[dict], csv_path: str): # type: ignore
 # Single File Analysis
 # ---------------------------------------------------------------------------
 
+def _save_output(path: str, content: str) -> None:
+    """Write a report to disk, failing with a clean message instead of a traceback."""
+    try:
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(content)
+    except OSError as error:
+        print(
+            f"[ERROR] Could not write output to {_safe_terminal_text(path)}: "
+            f"{_safe_terminal_text(error.strerror or error)}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    print(f"[*] Output saved to: {_safe_terminal_text(path)}", file=sys.stderr)
+
+
 def run_single(args: argparse.Namespace):
     """Handle single file analysis."""
     if not os.path.isfile(args.file):
@@ -388,8 +403,15 @@ def run_single(args: argparse.Namespace):
             auth_source=getattr(args, "auth_source", "unknown_capture"),
         ) # type: ignore
     except EmailLimitError as error:
-        print(f"[ERROR] Input rejected: {error}", file=sys.stderr)
+        print(f"[ERROR] Input rejected: {_safe_terminal_text(error)}", file=sys.stderr)
         sys.exit(2)
+    except OSError as error:
+        print(
+            f"[ERROR] Could not read {_safe_terminal_text(args.file)}: "
+            f"{_safe_terminal_text(error.strerror or error)}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     if args.output == "json":
         content = json.dumps(report, indent=2)
@@ -404,9 +426,7 @@ def run_single(args: argparse.Namespace):
         content = print_text_report(report, color=_should_use_color(args.color, sys.stdout))
 
     if args.save_output:
-        with open(args.save_output, 'w', encoding='utf-8') as f:
-            f.write(content)
-        print(f"[*] Output saved to: {args.save_output}", file=sys.stderr)
+        _save_output(args.save_output, content)
 
 
 # ---------------------------------------------------------------------------
@@ -432,9 +452,7 @@ def run_url(args: argparse.Namespace):
         content = print_url_report(report, color=_should_use_color(args.color, sys.stdout))
 
     if args.save_output:
-        with open(args.save_output, 'w', encoding='utf-8') as f:
-            f.write(content)
-        print(f"[*] Output saved to: {args.save_output}", file=sys.stderr)
+        _save_output(args.save_output, content)
 
 
 # ---------------------------------------------------------------------------
@@ -513,13 +531,19 @@ def run_batch(args: argparse.Namespace):
 
     # Save the same content that went to stdout if -O specified
     if args.save_output:
-        with open(args.save_output, 'w', encoding='utf-8') as f:
-            f.write(content)
-        print(f"[*] Output saved to: {_safe_terminal_text(args.save_output)}", file=sys.stderr)
+        _save_output(args.save_output, content)
 
     # Export CSV if --csv specified
     if args.csv:
-        export_csv(results, args.csv)
+        try:
+            export_csv(results, args.csv)
+        except OSError as error:
+            print(
+                f"[ERROR] Could not write output to {_safe_terminal_text(args.csv)}: "
+                f"{_safe_terminal_text(error.strerror or error)}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
     if had_errors:
         print("[ERROR] One or more files could not be analyzed.", file=sys.stderr)

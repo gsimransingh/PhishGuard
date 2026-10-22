@@ -221,3 +221,39 @@ def test_a6_batch_html_is_rejected_explicitly(tmp_path, monkeypatch, capsys):
     assert exit_info.value.code == 1
     assert captured.out == ""
     assert "not supported for batch" in captured.err
+
+
+# --- A7: raw tracebacks for unreadable input or unwritable output ----------
+
+def test_a7_unreadable_email_gives_clean_error(monkeypatch, capsys):
+    from phishguard import cli
+
+    def _denied(_path):
+        raise PermissionError(13, "Permission denied", "locked.eml")
+
+    monkeypatch.setattr(cli, "parse_eml", _denied)
+    with pytest.raises(SystemExit) as exit_info:
+        _run_cli(monkeypatch, "-f", str(SAMPLES / "legitimate_email.eml"))
+
+    assert exit_info.value.code == 1
+    err = capsys.readouterr().err
+    assert "[ERROR] Could not read" in err
+    assert "Traceback" not in err
+
+
+def test_a7_unwritable_save_path_gives_clean_error(tmp_path, monkeypatch, capsys):
+    target = tmp_path / "missing-dir" / "out.json"
+    with pytest.raises(SystemExit) as exit_info:
+        _run_cli(monkeypatch, "-f", str(SAMPLES / "legitimate_email.eml"), "-o", "json", "-O", str(target))
+
+    assert exit_info.value.code == 1
+    assert "[ERROR] Could not write output" in capsys.readouterr().err
+
+
+def test_a7_unwritable_batch_save_path_gives_clean_error(tmp_path, monkeypatch, capsys):
+    target = tmp_path / "missing-dir" / "summary.txt"
+    with pytest.raises(SystemExit) as exit_info:
+        _run_cli(monkeypatch, "-F", str(_batch_folder(tmp_path)), "-O", str(target))
+
+    assert exit_info.value.code == 1
+    assert "[ERROR] Could not write output" in capsys.readouterr().err
