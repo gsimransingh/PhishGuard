@@ -23,6 +23,6 @@ Content-Transfer-Encoding: base64
 Content-Disposition: attachment; filename="invoice.pdf"
 MIME-Version: 1.0
 
-c3ludGhldGljIFBERiBwbGFjZWhvbGRlcg==
+JVBERi0xLjQKJSBzeW50aGV0aWMgUERGIHBsYWNlaG9sZGVyCiUlRU9GCg==
 
 --synthetic-synthetic_safe_attachment_01--

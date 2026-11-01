@@ -1,4 +1,4 @@
-From: updates@example.com
+From: Contributor <contributor@example.org>
 To: analyst@example.test
 Date: Mon, 10 Aug 2026 09:00:00 +0000
 Message-ID: <synthetic_mailing_list_01@example.com>
@@ -6,7 +6,11 @@ Subject: Community digest
 Received: from mx.example.com (203.0.113.10) by mx.example.test
 Received-SPF: pass
 DKIM-Signature: v=1; d=example.com; s=synthetic;
-Authentication-Results: mx.example.com; spf=pass; dkim=pass; dmarc=pass
+Authentication-Results:
+ mx.example.com; spf=pass; dkim=fail (body hash did not verify); dmarc=fail
+List-Id: Community discussion <dev-list.example.com>
+List-Unsubscribe: <https://example.com/lists/dev/unsubscribe>
+List-Post: <mailto:dev-list@example.com>
 Content-Type: text/plain; charset="utf-8"
 Content-Transfer-Encoding: 7bit
 MIME-Version: 1.0

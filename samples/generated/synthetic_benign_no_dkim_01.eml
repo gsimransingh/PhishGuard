@@ -1,0 +1,13 @@
+From: updates@example.com
+To: analyst@example.test
+Date: Mon, 10 Aug 2026 09:00:00 +0000
+Message-ID: <synthetic_benign_no_dkim_01@example.com>
+Subject: Order confirmation
+Received: from mx.example.com (203.0.113.10) by mx.example.test
+Received-SPF: pass
+Authentication-Results: mx.example.com; spf=pass; dmarc=pass
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+MIME-Version: 1.0
+
+This is a synthetic benign message for parser regression testing.

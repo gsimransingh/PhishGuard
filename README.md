@@ -2,7 +2,7 @@
 
 > Explainable phishing-email triage for SOC analysts. PhishGuard takes a suspicious `.eml` file, extracts the evidence, scores it with rules you can read, and hands the analyst a disposition, a priority, and next steps.
 
-![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
+![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ## Who it is for
@@ -20,13 +20,19 @@ For each reported email it answers four questions:
 
 PhishGuard is **pre-1.0**. Detection quality is measured on an offline corpus and the numbers are published here, including the bad ones.
 
-**Corpus:** 41 labelled emails (21 phishing, 20 benign): 7 hand-written fixtures plus 34 deterministic synthetic `.eml` files. **No real-world captures yet.** These numbers say how the rules behave on known patterns, not how the tool performs in production.
+**Corpus:** 45 labelled emails (23 phishing, 22 benign): 7 hand-written fixtures plus 38 deterministic synthetic `.eml` files. **No real-world captures yet.** These numbers say how the rules behave on known patterns, not how the tool performs in production.
 
 | Run mode | Accuracy | Phishing recall | False-positive rate |
 | --- | --- | --- | --- |
-| Default CLI (`--auth-source unknown_capture`) | 56% | **48%** | 0% |
+| Default CLI (`--auth-source unknown_capture`) | 100% | **100%** (23/23) | 0% |
 
-**What the 48% means:** with default settings, authentication results (SPF/DKIM/DMARC) are recorded but not scored, because PhishGuard cannot tell whether an `Authentication-Results` header was written by your mail gateway or forged by the sender. Phishing that relies mainly on spoofed authentication is therefore under-scored. Fixing this safely is the 0.7 milestone.
+**Read that 100% as "this corpus has stopped discriminating", not as "detection is finished".** Fourteen confirmed gaps are still open below, and the corpus contains no case for any of them — a sender-domain lookalike with no links, a credential-harvesting `<form>` with no `<a href>`, and the brand false positives are all unmeasured here. The number is a regression floor, not an accuracy claim.
+
+This is a different figure from the 100% this README previously withdrew. That one came from scoring each case under its own `auth_source` label, so the label leaked the answer. This one scores every case in uniform default CLI mode, and the benign half now contains mail that genuinely fails authentication. The methodology is sound; the corpus is simply too easy. Making it harder is milestone 0.9.
+
+**Why recall moved from 48% to 95%:** earlier versions discarded SPF/DKIM/DMARC results entirely unless the analyst declared the header's provenance, so a message that failed all three came back `likely_benign` with no flags. The threat model is asymmetric, though: an attacker who forges an `Authentication-Results` header writes `pass` to slip past a filter — forging `dmarc=fail` against yourself achieves nothing. So a recorded **failure** is now scored whatever its provenance, while a recorded **pass** still counts for nothing unless you pass `--auth-source trusted_gateway`. Absent results (`missing`, `none`, `neutral`) are not scored either, since stripping a header is free.
+
+**What that costs:** legitimate mail does fail authentication. Forwarding breaks SPF, and a mailing list that appends a footer invalidates DKIM and takes DMARC with it. When a message carries list (RFC 2919/2369) or `Resent-*` headers, authentication failures are scored at half weight with `low` confidence and a caveat naming the relay evidence — the finding stays visible, but ordinary list traffic does not escalate. The benign half of the corpus now includes forwarded and mailing-list messages that genuinely fail authentication, so that 0% false-positive rate is measured rather than assumed.
 
 Earlier versions of this README reported 100% accuracy. That figure came from an evaluation in which every phishing case ran in trusted-gateway mode and every benign case did not, so the label leaked into the result. It has been withdrawn.
 
@@ -34,33 +40,35 @@ Earlier versions of this README reported 100% accuracy. That figure came from an
 
 | Area | Checks | Scored by default |
 | --- | --- | --- |
-| Authentication | SPF, DKIM, DMARC results from `Authentication-Results` / `Received-SPF`; DKIM signature presence | Only with `--auth-source trusted_gateway` |
+| Authentication | SPF, DKIM, DMARC results from `Authentication-Results` / `Received-SPF`; DKIM signature presence | Recorded **failures** always; `pass` and `missing` only with `--auth-source trusted_gateway` |
 | Sender | Reply-To vs From mismatch | Yes |
 | Links | HTML link text vs real destination; IP hosts, `@` tricks, deep subdomains, abused TLDs, non-standard ports, punycode; typosquat and combosquat against a curated brand list | Yes |
-| Attachments | Risky and active-content extensions, double extensions, bidirectional-text filenames, executable MIME type vs filename | Yes |
+| Attachments | Risky and active-content extensions, double extensions, bidirectional-text filenames, executable MIME type vs filename, **file signature vs extension**; SHA-256 per attachment; found regardless of `Content-Disposition` | Yes |
 | Enrichment (opt-in) | AbuseIPDB (IPs), VirusTotal (URLs), SPF/DMARC DNS, RDAP domain age, TLS certificate | Only with `--enrich` |
 
-Every finding carries its weight, confidence, evidence, a false-positive caveat, and a recommended next step. Output formats: text, JSON (schema `1.0`), HTML, CEF, batch summary, and CSV. A standalone `-u` mode lets an analyst pivot on a single URL or domain.
+Extracted indicators include each attachment's SHA-256 and detected file format, so an analyst can pivot to a sandbox or reputation service without opening anything. Every finding carries its weight, confidence, evidence, a false-positive caveat, and a recommended next step. Output formats: text, JSON (schema `1.0`), HTML, CEF, batch summary, and CSV. A standalone `-u` mode lets an analyst pivot on a single URL or domain.
 
 ## Known detection gaps
 
 These are confirmed misses or false positives, tracked on the roadmap below. Analysts should check for them manually until they are fixed.
 
-- **Attachments not marked `Content-Disposition: attachment` are not seen.** An executable sent `inline`, or with no disposition, produces no attachment finding.
-- **File type comes from the filename and MIME type only.** File signatures (magic bytes) are not checked, so an executable named `invoice.pdf` and sent as `application/octet-stream` scores 0.
-- **A direct signal can still end up `likely_benign`.** A link-text mismatch or executable type mismatch only forces escalation when the total score is HIGH.
-- **The sender domain itself is not checked for lookalikes.** `"PayPal Security" <service@paypa1.com>` with no links scores 0.
+- **The sender domain itself is not checked for lookalikes.** `"PayPal Security" <service@paypa1.com>` with no links scores 0 — even though the same domain scores 35 through `-u`. The brand engine is simply not pointed at the `From` header.
 - **HTML forms, iframes, and meta refresh are not extracted.** Only `<a href>` links are.
 - **The brand check flags some legitimate domains.** Examples include `login.microsoftonline.com`, `outlook.office365.com`, `s3.amazonaws.com`, and `purchase.com` (contains "chase"). Short brands also match ordinary words (`abc.com` → hsbc, `ups.com` → usps).
 - **A display name can hide a Reply-To mismatch.** For example: `"a@x.com <a@x.com>" <evil@y.com>`.
 - **URLs containing a backslash are analyzed as the wrong host.** For `http://evil.example\@paypal.com`, browsers go to `evil.example`, but PhishGuard analyzes `paypal.com`.
 - **One VirusTotal engine is enough to raise a high-confidence malicious finding.**
+- **The HTML report omits the authentication interpretation.** It prints the raw SPF/DKIM/DMARC header values but not `score_status` or `scored_because`, so it does not show which results were scored and which were ignored. It also omits `url_analysis`, `dns_validation`, and the received chain, making it a less complete view than the JSON report.
+- **IPv6 and obfuscated IP hosts are not flagged as raw-IP destinations.** `ip_as_hostname` matches dotted-quad IPv4 only, so `http://[2001:db8::1]/`, `http://1021342134/` (decimal) and `http://0x7f.1/` (hex) score 0.
+- **An unknown public suffix defeats the brand checks.** When `tldextract`'s bundled snapshot does not recognise a suffix, the whole hostname is treated as the registrable domain, so `paypal.com.evil.<unknown-tld>` reads its leftmost label as the real brand and is skipped.
+- **A valid header-only `.eml` is rejected.** Parsing requires a blank line within the 64 KiB header limit, so a message with no body — a common SOC capture — fails with a misleading size error, as do empty and non-email files.
 
 ### Design limitations
 
 - HTML is parsed for evidence only; PhishGuard never renders HTML, fetches content, or executes attachments.
 - DKIM signatures are detected, not cryptographically verified.
-- Authentication headers affect scoring only when the analyst declares their provenance, because forged `Authentication-Results` headers are trivial to add.
+- A recorded authentication **failure** is scored whatever its provenance; a recorded **pass** is scored only when the analyst declares the header trustworthy, because forging a `pass` is exactly what an attacker would do. A `missing` result is never scored — stripping a header costs nothing.
+- Relay-aware softening keys off list and `Resent-*` headers, which an attacker can also add. It reduces the weight of an authentication failure; it never suppresses the finding, and every other check still applies at full weight.
 - DNS records show what a domain publishes, not what happened at delivery.
 - Domain extraction uses a bundled public-suffix snapshot; update the dependency periodically.
 - Enrichment coverage depends on API keys, availability, and rate limits.
@@ -209,10 +217,13 @@ The report also includes an L1 disposition. `HIGH` means escalate for review; it
 does not automatically mean malicious. `malicious_escalate` is reserved for a
 `CRITICAL` score, or a `HIGH` score that includes a direct artifact signal
 such as a confirmed malicious URL, a displayed-link mismatch, or an
-attachment type mismatch (see Known detection gaps). Other MEDIUM
-and HIGH results use `suspicious_escalate`, while LOW results use
-`likely_benign`. This keeps triage cautious until the evidence is strong enough
-to support a malicious classification.
+attachment type mismatch. Other MEDIUM and HIGH results use
+`suspicious_escalate`, and so does **any** direct signal whatever its score:
+those checks name an artifact an analyst can act on, so one is never reported
+as `likely_benign` just because the arithmetic stayed under the MEDIUM
+threshold. Everything else is `likely_benign`. This keeps triage cautious
+until the evidence is strong enough to support a malicious classification,
+without letting a confirmed artifact be buried by a low total.
 
 URL words such as `login`, `verify`, or `password` remain visible as analyst
 evidence but are score-neutral by themselves. Stronger URL structure,
@@ -225,27 +236,33 @@ Each milestone ends on a **measurable exit criterion**, not a feature checklist.
 
 ### Shipped (0.3 – 0.5)
 
-Bounded parsing of hostile input, offline-by-default operation, safe HTML/CEF/CSV/terminal output, CI on Python 3.10–3.14 with dependency audit and static security checks, HTML link extraction, link-text mismatch detection, attachment filename heuristics, public-suffix-aware domain parsing, unified URL and email findings, per-rule score de-duplication, L1 disposition and priority, JSON schema `1.0`, and a synthetic offline corpus.
+Bounded parsing of hostile input, offline-by-default operation, safe HTML/CEF/CSV/terminal output, CI on Python 3.11–3.14 with dependency audit and static security checks, HTML link extraction, link-text mismatch detection, attachment filename heuristics, public-suffix-aware domain parsing, unified URL and email findings, per-rule score de-duplication, L1 disposition and priority, JSON schema `1.0`, and a synthetic offline corpus with an explicit, published default-mode baseline.
 
-### 0.6: Honest baseline (next)
+### 0.6: Honest baseline — shipped
 
-- [ ] Evaluation runs every case in default CLI mode and reports it alongside any trusted-gateway run
-- [ ] Remove the `accuracy == 1.0` test assertion; enforce a minimum recall floor instead
-- [ ] Regression tests for every confirmed gap above (written failing first)
+- [x] Evaluation runs every case in default CLI mode and reports it alongside any trusted-gateway run
+- [x] Remove the `accuracy == 1.0` test assertion; enforce a minimum recall floor instead
+- [x] Regression tests for every confirmed gap above (written failing first)
 
-**Exit criterion:** default-mode metrics are reproducible with one command and published in this README.
+**Exit criterion met:** `python -m evaluation.run --include-synthetic --summary` reproduces the default-mode metrics published above, and prints every miss.
 
-### 0.7: No silent misses
+### 0.7: No silent misses (next)
 
-- [ ] `--trusted-authserv-id`: trust only `Authentication-Results` stamped by your own receiving servers (RFC 8601 §5)
-- [ ] Detect attachments regardless of `Content-Disposition`; check file signatures; report SHA-256 per attachment
-- [ ] Any direct malicious signal escalates to at least `suspicious_escalate`
+- [x] Score recorded authentication **failures** regardless of header provenance; keep ignoring unverified `pass` and `missing`
+- [x] Benign corpus contains mail that legitimately fails authentication (forwarded, mailing list), so the false-positive ceiling is measurable
+- [x] Relay-aware softening so legitimate list traffic does not escalate on a broken DKIM signature
+- [x] Detect attachments regardless of `Content-Disposition`; check file signatures; report SHA-256 per attachment
+- [x] Any direct malicious signal escalates to at least `suspicious_escalate`, whatever the total score
+- [ ] `--trusted-authserv-id`: trust a `pass` only when stamped by your own receiving servers (RFC 8601 §5)
 
-**Exit criterion:** default-mode phishing recall ≥ 85% on the corpus with false-positive rate unchanged.
+**Exit criterion met:** default-mode phishing recall is 100% (23/23) with the false-positive rate still 0%, against a benign set that now includes mail which legitimately fails authentication. The `--trusted-authserv-id` box stays open: it is what would let a `pass` count for something, which matters for ranking rather than for recall.
+
+Weights and thresholds remain uncalibrated against each other — the heaviest direct signal is 40 against a HIGH threshold of 70, so `malicious_escalate` is still hard to reach offline. The disposition floor added here routes around that rather than fixing it; the arithmetic belongs in 0.8.
 
 ### 0.8: Analyst trust
 
-- [ ] Brand-owned domain allowlist, stricter edit distance, whole-token combosquat matching
+- [ ] Brand-owned domain allowlist (`known_brands.json` needs a `domains` field), stricter edit distance scaled to label length, whole-token combosquat matching
+- [ ] Recalibrate weights against thresholds so a direct signal can reach `malicious_escalate` on its own evidence
 - [ ] Address-parser-based Reply-To comparison; WHATWG-style backslash handling in URLs
 - [ ] Sender-domain lookalike and display-name brand-spoof checks
 - [ ] Extract `form[action]`, `iframe`, `meta refresh`, `data:` / `javascript:` URLs; flag password inputs

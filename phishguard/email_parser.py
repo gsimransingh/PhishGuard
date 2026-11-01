@@ -1,3 +1,4 @@
+import hashlib
 import ipaddress
 import os
 import re
@@ -49,6 +50,13 @@ def parse_eml(file_path: str) -> dict:
         "dkim":             msg.get("DKIM-Signature", ""),
         "dmarc":            msg.get("Authentication-Results", ""),
         "authentication_results": msg.get_all("Authentication-Results", []),
+        # Mailing-list (RFC 2919/2369) and resent (RFC 5322) headers. A list
+        # that rewrites a message legitimately breaks its DKIM signature, so
+        # the analyzer uses these to soften authentication-failure scoring.
+        "list_id":          msg.get("List-Id", ""),
+        "list_post":        msg.get("List-Post", ""),
+        "list_unsubscribe": msg.get("List-Unsubscribe", ""),
+        "resent_from":      msg.get("Resent-From", ""),
         "body_text":        body_text,
         "body_html":        body_html,
         "html_links":       html_links,
@@ -255,18 +263,119 @@ def _extract_ips(text: str) -> list[str]:
     return [ip for ip in all_ips if not _is_private_ip(ip)]
 
 
+# Leading bytes that identify a file's real format. Matched at offset 0 only,
+# longest first so a specific signature wins over a shorter prefix of it.
+#
+# These are deliberately few. The goal is not to be `libmagic`, it is to catch
+# the one case that matters for phishing triage: a payload whose real format
+# contradicts the extension it is advertising.
+_FILE_SIGNATURES: tuple[tuple[bytes, str], ...] = (
+    (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1", "ole2_compound"),
+    (b"7z\xbc\xaf\x27\x1c", "7z_archive"),
+    (b"Rar!\x1a\x07", "rar_archive"),
+    (b"\x89PNG\r\n\x1a\n", "png"),
+    (b"\x7fELF", "elf_executable"),
+    (b"%PDF", "pdf"),
+    (b"PK\x03\x04", "zip_container"),
+    (b"GIF87a", "gif"),
+    (b"GIF89a", "gif"),
+    (b"{\\rtf", "rtf"),
+    (b"\xca\xfe\xba\xbe", "java_class"),
+    (b"\xff\xd8\xff", "jpeg"),
+    (b"\x1f\x8b", "gzip_archive"),
+    (b"MZ", "pe_executable"),
+    (b"#!", "script_shebang"),
+)
+
+# Formats that run code when opened. A payload detected as one of these while
+# claiming a document extension is the signal worth escalating on.
+EXECUTABLE_SIGNATURES = frozenset({
+    "pe_executable", "elf_executable", "java_class", "script_shebang",
+})
+
+# What each extension's bytes should look like. Extensions absent from this
+# map are not checked: "no expectation" must not read as "mismatch".
+EXPECTED_SIGNATURES: dict[str, frozenset[str]] = {
+    ".pdf": frozenset({"pdf"}),
+    ".rtf": frozenset({"rtf"}),
+    ".png": frozenset({"png"}),
+    ".gif": frozenset({"gif"}),
+    ".jpg": frozenset({"jpeg"}),
+    ".jpeg": frozenset({"jpeg"}),
+    # Legacy Office and MSI are OLE2 compound documents.
+    ".doc": frozenset({"ole2_compound"}),
+    ".xls": frozenset({"ole2_compound"}),
+    ".ppt": frozenset({"ole2_compound"}),
+    ".msi": frozenset({"ole2_compound"}),
+    # OOXML and its macro-enabled variants are ZIP containers, as are JAR/APK.
+    ".docx": frozenset({"zip_container"}),
+    ".xlsx": frozenset({"zip_container"}),
+    ".pptx": frozenset({"zip_container"}),
+    ".docm": frozenset({"zip_container"}),
+    ".xlsm": frozenset({"zip_container"}),
+    ".pptm": frozenset({"zip_container"}),
+    ".zip": frozenset({"zip_container"}),
+    ".jar": frozenset({"zip_container"}),
+    ".apk": frozenset({"zip_container"}),
+    ".rar": frozenset({"rar_archive"}),
+    ".7z": frozenset({"7z_archive"}),
+    ".gz": frozenset({"gzip_archive"}),
+    ".exe": frozenset({"pe_executable"}),
+    ".dll": frozenset({"pe_executable"}),
+    ".scr": frozenset({"pe_executable"}),
+    ".com": frozenset({"pe_executable"}),
+}
+
+
+def _detect_signature(payload: bytes) -> str:
+    """Name the payload's real format from its leading bytes, or ""."""
+    for magic, name in _FILE_SIGNATURES:
+        if payload.startswith(magic):
+            return name
+    return ""
+
+
+def _is_attachment_part(part: Message) -> bool:
+    """Decide whether a MIME part carries a file rather than message body.
+
+    ``Content-Disposition: attachment`` is not required. Mail that delivers
+    malware routinely omits the header or sends ``inline``, and relying on it
+    meant an executable arrived completely invisible — not scored, and not
+    even listed as an indicator for the analyst.
+    """
+    if part.get_content_maintype() == "multipart":
+        return False
+    if (part.get_content_disposition() or "").lower() == "attachment":
+        return True
+    # A named part is a file whatever its disposition says. get_filename()
+    # also reads the Content-Type "name" parameter, which is where a part
+    # with no Content-Disposition at all still declares itself.
+    if part.get_filename():
+        return True
+    # Anything else that is not message text: inline images, nested messages,
+    # unnamed octet-streams.
+    return part.get_content_type() not in ("text/plain", "text/html")
+
+
 def _extract_attachments(msg: Message) -> list[dict]:
-    """Extract metadata of any attachments (filename, content-type, size)."""
+    """Extract attachment metadata, including SHA-256 and detected format."""
     attachments: list[dict] = []
     for part in msg.walk():
-        if part.get_content_disposition() == "attachment":
-            if len(attachments) >= MAX_ATTACHMENTS:
-                raise EmailLimitError(
-                    f"Email contains more than {MAX_ATTACHMENTS} attachments."
-                )
-            attachments.append({
-                "filename":     part.get_filename(""),
-                "content_type": part.get_content_type(),
-                "size_bytes":   len(part.get_payload(decode=True) or b"")
-            })
+        if not _is_attachment_part(part):
+            continue
+        if len(attachments) >= MAX_ATTACHMENTS:
+            raise EmailLimitError(
+                f"Email contains more than {MAX_ATTACHMENTS} attachments."
+            )
+        payload = part.get_payload(decode=True) or b""
+        attachments.append({
+            "filename":     part.get_filename(""),
+            "content_type": part.get_content_type(),
+            "size_bytes":   len(payload),
+            "disposition":  part.get_content_disposition() or "none",
+            # SHA-256 lets an analyst pivot to a sandbox or reputation service
+            # without ever opening the file.
+            "sha256":       hashlib.sha256(payload).hexdigest(),
+            "detected_type": _detect_signature(payload),
+        })
     return attachments
