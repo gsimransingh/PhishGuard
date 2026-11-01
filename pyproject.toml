@@ -7,7 +7,11 @@ name = "phishguard"
 dynamic = ["version"]
 description = "Explainable phishing-email triage for SOC analysts."
 readme = "README.md"
-requires-python = ">=3.10"
+# Python 3.10 reached end of life on 2026-10-01 and is dropped here, because
+# supporting it would mean shipping a vulnerable dependency: the fix for
+# CVE-2026-114605 is dnspython 2.9.0, which requires Python >= 3.11, and the
+# newest dnspython that still supports 3.10 is 2.8.0, which carries the CVE.
+requires-python = ">=3.11"
 license = {file = "LICENSE"}
 authors = [{name = "Gursimran Singh"}]
 # Floors, not exact pins: an exact pin on a transitive-free dependency means a

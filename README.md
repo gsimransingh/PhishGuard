@@ -2,7 +2,7 @@
 
 > Explainable phishing-email triage for SOC analysts. PhishGuard takes a suspicious `.eml` file, extracts the evidence, scores it with rules you can read, and hands the analyst a disposition, a priority, and next steps.
 
-![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
+![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ## Who it is for
@@ -236,7 +236,7 @@ Each milestone ends on a **measurable exit criterion**, not a feature checklist.
 
 ### Shipped (0.3 – 0.5)
 
-Bounded parsing of hostile input, offline-by-default operation, safe HTML/CEF/CSV/terminal output, CI on Python 3.10–3.14 with dependency audit and static security checks, HTML link extraction, link-text mismatch detection, attachment filename heuristics, public-suffix-aware domain parsing, unified URL and email findings, per-rule score de-duplication, L1 disposition and priority, JSON schema `1.0`, and a synthetic offline corpus with an explicit, published default-mode baseline.
+Bounded parsing of hostile input, offline-by-default operation, safe HTML/CEF/CSV/terminal output, CI on Python 3.11–3.14 with dependency audit and static security checks, HTML link extraction, link-text mismatch detection, attachment filename heuristics, public-suffix-aware domain parsing, unified URL and email findings, per-rule score de-duplication, L1 disposition and priority, JSON schema `1.0`, and a synthetic offline corpus with an explicit, published default-mode baseline.
 
 ### 0.6: Honest baseline — shipped
 
