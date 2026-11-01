@@ -10,9 +10,12 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = {file = "LICENSE"}
 authors = [{name = "Gursimran Singh"}]
+# Floors, not exact pins: an exact pin on a transitive-free dependency means a
+# security release needs a code change to reach users, and dnspython 2.6.1 sat
+# on CVE-2026-114605 long enough for CI's own pip-audit gate to fail.
 dependencies = [
-    "requests==2.34.2",
-    "dnspython==2.6.1",
+    "requests>=2.34.2",
+    "dnspython>=2.9.1",
     "tldextract>=5.3.0",
 ]
 
