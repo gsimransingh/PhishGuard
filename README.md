@@ -65,6 +65,7 @@ These are confirmed misses or false positives, tracked on the roadmap below. Ana
 - DNS records show what a domain publishes, not what happened at delivery.
 - Domain extraction uses a bundled public-suffix snapshot; update the dependency periodically. When the snapshot does not recognise a suffix, the registrable domain falls back to the last two labels, so an unknown TLD cannot make `paypal.com.evil.<new-tld>` read as the real PayPal.
 - Enrichment coverage depends on API keys, availability, and rate limits.
+- On Python 3.10, `dnspython` carries CVE-2026-114605 (excessive CPU use parsing DNS wire data). The fix requires `dnspython` 2.9.0, which requires Python 3.11+, so there is no fixed version for 3.10. It is reachable only through `--enrich` DNS validation; run 3.11 or later if that matters to you.
 - Repeated hits of one rule stay visible as evidence but score only once.
 
 ## Installation
