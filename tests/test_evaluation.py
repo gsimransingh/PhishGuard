@@ -40,19 +40,63 @@ def test_synthetic_corpus_is_backed_by_eml_files():
     repo_root = Path(__file__).parent.parent
     cases = build_synthetic_cases()
 
-    assert len(cases) == 40
+    assert len(cases) == 44
     assert all((repo_root / case["path"]).is_file() for case in cases)
     assert all(case["path"].endswith(".eml") for case in cases)
     assert {case["source_type"] for case in cases} == {"synthetic_generated_eml"}
 
 
 # Ratchet for the headline metric. Raise these floors whenever a fix lands;
-# never lower them to make a change pass. Values measured 2026-11-01 on the
-# 47-case corpus (7 fixtures + 40 synthetic) in default CLI mode, after the
-# brand work pointed the engine at the From header: 13 of 24 phishing cases
-# detected, up from 10 of 21 on the 41-case corpus.
-DEFAULT_MODE_RECALL_FLOOR = 13 / 24
+# never lower them to make a change pass. Measured 2026-11-01 on the 51-case
+# corpus (7 fixtures + 44 synthetic) in default CLI mode, after the brand work
+# added 6 cases: 3 lookalike-sender/brand-URL phishing cases and 3 legitimate
+# Microsoft 365 / Amazon / Google notifications. Earlier floors were 10/21
+# (48%), 20/21 (95%) and 23/23 (100%) on 45 cases.
+#
+# The floor is now 1.0, which does NOT mean detection is finished — it means
+# this corpus has stopped discriminating. Three confirmed gaps are still open
+# as strict xfails in tests/test_known_gaps.py (ten are documented in the
+# README), and none of those three has a case here. A saturated corpus is a
+# reason to add harder cases (0.9: real sanitized captures), not a reason to
+# claim accuracy.
+#
+# Keep this a recall floor and a false-positive ceiling, never an equality
+# assertion on accuracy: that was the shape of the withdrawn 100% claim.
+#
+# The false-positive ceiling is only meaningful because the benign half of the
+# corpus contains messages that legitimately fail authentication — forwarded
+# mail (SPF breaks) and mailing-list mail (DKIM and DMARC break). Keep it that
+# way: a benign set where nothing can fail authentication cannot measure the
+# cost of scoring failures.
+DEFAULT_MODE_RECALL_FLOOR = 1.0
 DEFAULT_MODE_MAX_FALSE_POSITIVE_RATE = 0.0
+
+
+def test_benign_corpus_can_produce_an_authentication_false_positive():
+    """Guard the corpus property the false-positive ceiling depends on.
+
+    Before this, every benign fixture carried spf=pass/dkim=pass/dmarc=pass,
+    because the generator derived the auth headers from each case's
+    ``auth_source`` label. "Is this phishing" and "does auth fail" were the
+    same variable, so a 0% false-positive rate was structurally guaranteed
+    rather than earned, and the cost of scoring failures was invisible.
+    """
+    import re
+
+    repo_root = Path(__file__).parent.parent
+    failing_benign = []
+    for case in build_synthetic_cases():
+        if case["expected_disposition"] != "likely_benign":
+            continue
+        raw = (repo_root / case["path"]).read_text(encoding="utf-8", errors="replace")
+        header = re.search(r"^Authentication-Results:((?:.*\n)(?:[ \t].*\n)*)", raw, re.M)
+        if header and re.search(r"=\s*(fail|softfail|permerror)", header.group(1)):
+            failing_benign.append(case["id"])
+
+    assert len(failing_benign) >= 4, (
+        "the benign corpus must keep messages that legitimately fail "
+        f"authentication; found only {failing_benign}"
+    )
 
 
 def test_default_cli_mode_does_not_regress():

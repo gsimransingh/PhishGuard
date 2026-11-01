@@ -25,6 +25,17 @@ python -m evaluation.run --include-synthetic --summary
 `tests/test_evaluation.py` enforces a recall floor and false-positive ceiling
 for default mode. Raise the floor whenever a fix lands; never lower it.
 
+The false-positive ceiling is only meaningful while the benign half of the
+corpus contains mail that legitimately fails authentication: forwarded
+messages (SPF breaks at the relay) and mailing-list messages (a footer
+invalidates DKIM, and DMARC follows). Each case's authentication profile is
+chosen explicitly in `AUTH_PROFILES`, independently of its `auth_source`
+label. Deriving one from the other made "is this phishing" and "does
+authentication fail" the same variable and guaranteed a 0% false-positive
+rate regardless of the rules, so
+`test_benign_corpus_can_produce_an_authentication_false_positive` guards
+against reintroducing that.
+
 Confirmed detection gaps are tracked as `xfail(strict=True)` tests in
 `tests/test_known_gaps.py`. When a fix makes one pass, strict mode fails the
 suite until the marker is removed, so the list stays honest.
@@ -57,7 +68,7 @@ escalation signal, while a malicious disposition requires CRITICAL severity or
 a direct malicious artifact signal.
 
 The default runner evaluates the seven checked-in email fixtures. The optional
-synthetic set adds 34 deterministic generated `.eml` fixtures, so the parser,
+synthetic set adds 38 deterministic generated `.eml` fixtures, so the parser,
 MIME handling, HTML-link extraction, and attachment metadata paths are also
 exercised. They are useful for regression testing without storing personal
 mail, but they are not a substitute for 30–50 real sanitized SOC captures when

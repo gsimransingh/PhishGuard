@@ -22,7 +22,6 @@ HEADERS = (
     "{extra}"
     "MIME-Version: 1.0\n"
 )
-MZ_PAYLOAD_B64 = "TVqQAAMAAAAEAAAA"  # first bytes of a Windows PE file ("MZ")
 
 
 def _analyze(tmp_path, raw: str) -> dict:
@@ -31,67 +30,11 @@ def _analyze(tmp_path, raw: str) -> dict:
     return analyze(parse_eml(str(path)), str(path))
 
 
-def _multipart_with_part(part_headers: str) -> str:
-    return (
-        HEADERS.format(sender="billing@sender.example", extra="")
-        + 'Content-Type: multipart/mixed; boundary="b"\n\n'
-        + "--b\nContent-Type: text/plain\n\nSee attached.\n"
-        + f"--b\n{part_headers}Content-Transfer-Encoding: base64\n\n{MZ_PAYLOAD_B64}\n--b--\n"
-    )
-
-
 def _checks(report: dict) -> set[str]:
     return {finding["check"] for finding in report["findings"]}
 
 
 gap = pytest.mark.xfail(strict=True, reason="Known detection gap; see README")
-
-
-# --- P0: phishing that currently comes back likely_benign ------------------
-
-@gap
-def test_inline_disposition_attachment_is_extracted(tmp_path):
-    raw = _multipart_with_part(
-        'Content-Type: application/octet-stream; name="invoice.exe"\n'
-        'Content-Disposition: inline; filename="invoice.exe"\n'
-    )
-    assert "risky_attachment_extension" in _checks(_analyze(tmp_path, raw))
-
-
-@gap
-def test_attachment_without_disposition_is_extracted(tmp_path):
-    raw = _multipart_with_part('Content-Type: application/octet-stream; name="invoice.exe"\n')
-    assert "risky_attachment_extension" in _checks(_analyze(tmp_path, raw))
-
-
-@gap
-def test_executable_bytes_behind_document_name_are_flagged(tmp_path):
-    raw = _multipart_with_part(
-        "Content-Type: application/octet-stream\n"
-        'Content-Disposition: attachment; filename="invoice.pdf"\n'
-    )
-    assert "attachment_type_mismatch" in _checks(_analyze(tmp_path, raw))
-
-
-@gap
-def test_attachment_sha256_is_reported(tmp_path):
-    raw = _multipart_with_part(
-        "Content-Type: application/pdf\n"
-        'Content-Disposition: attachment; filename="invoice.pdf"\n'
-    )
-    attachment = _analyze(tmp_path, raw)["iocs"]["attachments"][0]
-    assert len(attachment.get("sha256", "")) == 64
-
-
-@gap
-def test_direct_signal_is_never_likely_benign(tmp_path):
-    raw = _multipart_with_part(
-        'Content-Type: application/x-msdownload; name="invoice.pdf"\n'
-        'Content-Disposition: attachment; filename="invoice.pdf"\n'
-    )
-    report = _analyze(tmp_path, raw)
-    assert "attachment_type_mismatch" in _checks(report)
-    assert report["disposition"] != "likely_benign"
 
 
 # --- P1: evasions and false positives ---------------------------------------

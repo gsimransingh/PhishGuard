@@ -194,6 +194,12 @@ def print_text_report(report: dict, out=sys.stdout, color: bool = False) -> str:
     lines.append(f"    Attachments : {len(report['iocs']['attachments'])} found") # type: ignore
     for att in report["iocs"]["attachments"]: # type: ignore
         lines.append(f"      - {_safe_terminal_text(att['filename'])} ({_safe_terminal_text(att['content_type'])}, {_safe_terminal_text(att['size_bytes'])} bytes)") # type: ignore
+        detail = [f"disposition={_safe_terminal_text(att.get('disposition', 'none'))}"]
+        if att.get("detected_type"):
+            detail.append(f"detected={_safe_terminal_text(att['detected_type'])}")
+        lines.append(f"          {' '.join(detail)}")
+        if att.get("sha256"):
+            lines.append(f"          sha256={_safe_terminal_text(att['sha256'])}")
     lines.append(sep) # type: ignore
     lines.append("  Threat Intel:") # type: ignore
     for r in report["threat_intel"]["ip_checks"]: # type: ignore

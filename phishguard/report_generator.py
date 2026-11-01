@@ -45,11 +45,25 @@ def generate_html_report(report: dict, output_path: str = None) -> str:
     ) or '<p class="no-data">No detailed findings.</p>'
     urls_html = render_list(iocs["urls"]) if iocs["urls"] else '<p class="no-data">No URLs found.</p>'
     ips_html = render_list(iocs["ips"]) if iocs["ips"] else '<p class="no-data">No IPs found.</p>'
+    def attachment_detail(attachment: dict) -> str:
+        """Render the pivot data an analyst needs without opening the file."""
+        parts = [f"disposition: {html_escape(attachment.get('disposition', 'none'))}"]
+        if attachment.get("detected_type"):
+            parts.append(f"detected format: {html_escape(attachment['detected_type'])}")
+        detail = f'<div class="attachment-detail">{" | ".join(parts)}</div>'
+        if attachment.get("sha256"):
+            detail += (
+                '<div class="attachment-detail">SHA-256: '
+                f'{html_escape(attachment["sha256"])}</div>'
+            )
+        return detail
+
     attachments_html = ''.join(
-        "<li>{name} ({content_type}, {size} bytes)</li>".format(
+        "<li>{name} ({content_type}, {size} bytes){detail}</li>".format(
             name=html_escape(attachment.get("filename", "")),
             content_type=html_escape(attachment.get("content_type", "")),
             size=html_escape(attachment.get("size_bytes", 0)),
+            detail=attachment_detail(attachment),
         )
         for attachment in iocs["attachments"]
     )
@@ -171,6 +185,12 @@ def generate_html_report(report: dict, output_path: str = None) -> str:
             padding: 12px;
             margin: 8px 0;
             font-size: 14px;
+        }}
+        .attachment-detail {{
+            color: #666;
+            font-size: 12px;
+            margin-top: 4px;
+            word-break: break-all;
         }}
         .no-data {{ color: #999; font-style: italic; }}
         .footer {{
@@ -310,6 +330,15 @@ def generate_cef_log(report: dict) -> str:
 
     if report['iocs']['urls']:
         extensions.append(f"request={escape_cef(report['iocs']['urls'][0])}")
+
+    # CEF's standard file fields, so a SIEM can correlate an attachment hash
+    # against sandbox verdicts without parsing the JSON report.
+    attachments = report['iocs'].get('attachments', [])
+    hashed = next((a for a in attachments if a.get('sha256')), None)
+    if hashed:
+        extensions.append(f"fname={escape_cef(hashed.get('filename', ''))}")
+        extensions.append(f"fileHash={escape_cef(hashed['sha256'])}")
+        extensions.append("cs7Label=FileHashAlg cs7=SHA-256")
     if ips:
         observed = ','.join(str(ip) for ip in ips[:5])
         extensions.append(f"cs6Label=ObservedIPs cs6={escape_cef(observed)}")

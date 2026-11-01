@@ -13,6 +13,7 @@ from email.utils import getaddresses
 from typing import Optional
 from urllib.parse import urlparse
 
+from phishguard.email_parser import EXECUTABLE_SIGNATURES, EXPECTED_SIGNATURES
 from phishguard.threat_intel import check_ips, check_urls
 from phishguard.dns_validator import validate_spf_dns, validate_dmarc_dns
 from phishguard.url_analyzer import (
@@ -86,11 +87,35 @@ def analyze(
     dkim_status = auth_evidence["dkim"]["score_status"]
     dmarc_status = auth_evidence["dmarc"]["score_status"]
 
-    if spf_status in ("fail", "softfail", "permerror"):
+    # A mailing list or resending relay breaks authentication as a side effect
+    # of doing its job, so an unverified failure on such a message is weaker
+    # evidence. The finding stays visible either way; only its weight and
+    # confidence drop, and only when the analyst has not vouched for the
+    # header's provenance.
+    relay_indicators = auth_evidence["spf"]["relay_context"]
+    soften_auth = bool(relay_indicators) and not auth_trusted
+
+    def auth_weight(base: int) -> int:
+        return base // 2 if soften_auth else base
+
+    def auth_confidence(base: str) -> str:
+        return "low" if soften_auth else base
+
+    def auth_note(base: str) -> str:
+        if not soften_auth:
+            return base
+        return (
+            f"{base} This message carries {', '.join(relay_indicators)}, so the "
+            "failure was scored at reduced weight."
+        )
+
+    if spf_status in _RECORDED_AUTH_FAILURES:
         add_finding(
-            "spf_failure", "SPF check failed", 30, "medium",
-            {"status": spf_status, "source": auth_evidence["spf"]["source"]},
-            "Forwarding and mailing-list infrastructure can legitimately break SPF.",
+            "spf_failure", "SPF check failed",
+            auth_weight(30), auth_confidence("medium"),
+            {"status": spf_status, "source": auth_evidence["spf"]["source"],
+             "relay_context": relay_indicators},
+            auth_note("Forwarding and mailing-list infrastructure can legitimately break SPF."),
             "Validate the trusted receiving server's Authentication-Results header and sender alignment.",
         )
     elif spf_status == "missing":
@@ -101,11 +126,13 @@ def analyze(
             "Check the message's trusted Authentication-Results header or perform approved DNS validation.",
         )
 
-    if dkim_status in ("fail", "permerror"):
+    if dkim_status in _RECORDED_AUTH_FAILURES:
         add_finding(
-            "dkim_failure", "DKIM verification failed", 25, "medium",
-            {"status": dkim_status, "source": auth_evidence["dkim"]["source"]},
-            "Messages can be modified in transit by legitimate gateways or mailing lists.",
+            "dkim_failure", "DKIM verification failed",
+            auth_weight(25), auth_confidence("medium"),
+            {"status": dkim_status, "source": auth_evidence["dkim"]["source"],
+             "relay_context": relay_indicators},
+            auth_note("Messages can be modified in transit by legitimate gateways or mailing lists."),
             "Validate the trusted receiver's DKIM result and signing-domain alignment.",
         )
     elif dkim_status == "missing":
@@ -116,11 +143,13 @@ def analyze(
             "Compare this absence with SPF, DMARC, sender history, and message content.",
         )
 
-    if dmarc_status in ("fail", "permerror"):
+    if dmarc_status in _RECORDED_AUTH_FAILURES:
         add_finding(
-            "dmarc_failure", "DMARC check failed", 25, "high",
-            {"status": dmarc_status, "source": auth_evidence["dmarc"]["source"]},
-            "Forwarding or receiver-specific evaluation can occasionally produce legitimate failures.",
+            "dmarc_failure", "DMARC check failed",
+            auth_weight(25), auth_confidence("high"),
+            {"status": dmarc_status, "source": auth_evidence["dmarc"]["source"],
+             "relay_context": relay_indicators},
+            auth_note("Forwarding or receiver-specific evaluation can occasionally produce legitimate failures."),
             "Confirm the trusted receiver's DMARC result and inspect SPF/DKIM alignment.",
         )
     elif dmarc_status == "missing":
@@ -524,8 +553,41 @@ def _extract_email_address(header_value: str) -> str:
     return address.strip().lower()
 
 
+# Results that represent a failure the receiving system actually recorded.
+# These are scored whatever the provenance of the header, because the threat
+# model is asymmetric: an attacker who forges an Authentication-Results header
+# writes "pass" to evade a filter. Forging "dmarc=fail" against yourself has
+# no attack value. So a recorded failure is self-authenticating evidence,
+# while a recorded pass is only worth as much as the server that stamped it.
+#
+# "missing", "none", "neutral", "temperror" and "present_unverified" are
+# deliberately NOT in this set: they describe absent or inconclusive
+# evidence, which an attacker CAN manufacture simply by stripping a header.
+_RECORDED_AUTH_FAILURES = frozenset({"fail", "softfail", "permerror"})
+
+# RFC 2919 / RFC 2369 list headers and RFC 5322 resent headers. Their presence
+# is structural evidence that an intermediary legitimately relayed — and likely
+# modified — this message, which is the documented false-positive class for
+# authentication failures: a mailing list that appends a footer invalidates the
+# original DKIM signature and takes DMARC down with it.
+_RELAY_CONTEXT_HEADERS = (
+    "list_id", "list_post", "list_unsubscribe", "resent_from",
+)
+
+
+def _relay_context(parsed: dict) -> list[str]:
+    """Return the relay indicators present, which soften auth-failure scoring."""
+    return [name for name in _RELAY_CONTEXT_HEADERS if parsed.get(name)]
+
+
 def _interpret_authentication(parsed: dict, trusted: bool = False) -> dict:
-    """Interpret authentication results and gate scoring on trusted provenance."""
+    """Interpret authentication results and decide what may be scored.
+
+    Scoring is allowed for a result when either the analyst has declared the
+    header's provenance trustworthy (``--auth-source trusted_gateway``), or
+    the result is a failure the receiver recorded — see
+    ``_RECORDED_AUTH_FAILURES`` for why those two cases differ.
+    """
     authentication_headers = parsed.get("authentication_results") or []
     closest_result = str(authentication_headers[0]) if authentication_headers else str(parsed.get("dmarc", ""))
 
@@ -557,12 +619,21 @@ def _interpret_authentication(parsed: dict, trusted: bool = False) -> dict:
 
     dmarc_status, dmarc_source = result_for("dmarc")
 
+    relay_indicators = _relay_context(parsed)
+
     def evidence(status: str, source: str, meaning: str) -> dict:
+        recorded_failure = status in _RECORDED_AUTH_FAILURES
         return {
             "status": status,
-            "score_status": status if trusted else "untrusted",
+            "score_status": status if (trusted or recorded_failure) else "untrusted",
+            "scored_because": (
+                "analyst_declared_trusted_gateway" if trusted
+                else "recorded_failure" if recorded_failure
+                else "not_scored_unverified_provenance"
+            ),
             "source": source,
             "trusted": trusted,
+            "relay_context": relay_indicators,
             "meaning": meaning,
         }
 
@@ -697,15 +768,66 @@ def _attachment_findings(attachment: dict) -> list[dict]:
             "recommended_action": "Inspect the raw filename and actual file type in an approved environment.",
         })
 
-    if content_type in _EXECUTABLE_CONTENT_TYPES and final_extension not in _ALL_FLAGGED_EXTENSIONS:
+    detected_type = str(attachment.get("detected_type", ""))
+    declared_executable = content_type in _EXECUTABLE_CONTENT_TYPES
+    # Bytes beat both the filename and the Content-Type header, either of which
+    # the sender chose. An MZ header behind "invoice.pdf" is the whole point.
+    detected_executable = (
+        detected_type in EXECUTABLE_SIGNATURES
+        and final_extension not in _RISKY_ATTACHMENT_EXTENSIONS
+    )
+
+    if (declared_executable or detected_executable) and final_extension not in _ALL_FLAGGED_EXTENSIONS:
+        if detected_executable:
+            message = (
+                f"Attachment contents are executable, not the file type its name "
+                f"claims: {filename} (detected {detected_type}, declared {content_type})"
+            )
+            note = (
+                "A truncated or unusual file can begin with these bytes by "
+                "coincidence; confirm the full file signature in a sandbox."
+            )
+        else:
+            message = f"Attachment type does not match its filename: {filename} ({content_type})"
+            note = "Some mail clients assign inaccurate generic MIME types."
         findings.append({
             "finding_id": "attachment_type_mismatch",
-            "message": f"Attachment type does not match its filename: {filename} ({content_type})",
+            "message": message,
             "weight": 30,
             "confidence": "high",
-            "evidence": {"filename": filename, "extension": final_extension, "content_type": content_type},
-            "false_positive_note": "Some mail clients assign inaccurate generic MIME types.",
+            "evidence": {
+                "filename": filename, "extension": final_extension,
+                "content_type": content_type, "detected_type": detected_type,
+                "sha256": attachment.get("sha256", ""),
+            },
+            "false_positive_note": note,
             "recommended_action": "Verify the file signature in an approved sandbox before opening it.",
+        })
+    elif (
+        detected_type
+        and final_extension in EXPECTED_SIGNATURES
+        and detected_type not in EXPECTED_SIGNATURES[final_extension]
+    ):
+        # Not executable, but still not what it claims to be — a container
+        # swap, or an archive wearing a document name.
+        findings.append({
+            "finding_id": "attachment_signature_mismatch",
+            "message": (
+                f"Attachment contents do not match its extension: {filename} "
+                f"(detected {detected_type}, expected "
+                f"{'/'.join(sorted(EXPECTED_SIGNATURES[final_extension]))})"
+            ),
+            "weight": 15,
+            "confidence": "medium",
+            "evidence": {
+                "filename": filename, "extension": final_extension,
+                "detected_type": detected_type, "sha256": attachment.get("sha256", ""),
+            },
+            "false_positive_note": (
+                "Renamed exports and some generated files legitimately carry a "
+                "mismatched extension without being malicious."
+            ),
+            "recommended_action": "Confirm the real file type before opening the attachment.",
         })
 
     return findings
