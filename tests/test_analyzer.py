@@ -52,6 +52,10 @@ def _minimal_parsed(**overrides) -> dict:
         "dkim": "present",
         "dmarc": "pass",
         "authentication_results": [],
+        "list_id": "",
+        "list_post": "",
+        "list_unsubscribe": "",
+        "resent_from": "",
         "html_links": [],
         "urls": [],
         "ips": [],
@@ -398,16 +402,84 @@ def test_authentication_source_context_is_explicitly_preserved():
     assert report["authentication_evidence"]["source_context"] == "trusted_gateway"
 
 
-def test_untrusted_authentication_results_are_reported_but_not_scored():
+def test_untrusted_authentication_passes_are_reported_but_not_scored():
+    """An unverified 'pass' is worth nothing: forging one is the whole point."""
     parsed = _minimal_parsed(
-        authentication_results=["attacker.example; spf=fail; dkim=fail; dmarc=fail"]
+        authentication_results=["attacker.example; spf=pass; dkim=pass; dmarc=pass"]
     )
     report = analyze(parsed, "test.eml", run_intel=False, auth_source="unknown_capture")
 
     assert report["risk_score"] == 0
     assert report["flags"] == []
-    assert report["authentication_evidence"]["spf"]["status"] == "fail"
+    assert report["authentication_evidence"]["spf"]["status"] == "pass"
     assert report["authentication_evidence"]["spf"]["score_status"] == "untrusted"
+    assert report["authentication_evidence"]["spf"]["scored_because"] == (
+        "not_scored_unverified_provenance"
+    )
+
+
+def test_untrusted_authentication_failures_are_scored():
+    """A forged header claims pass, never fail, so a failure is self-evident.
+
+    Dropping these to zero was the reason default-mode recall sat at 48%: a
+    message that failed SPF, DKIM and DMARC came back likely_benign.
+    """
+    parsed = _minimal_parsed(
+        authentication_results=["mx.example.com; spf=fail; dkim=fail; dmarc=fail"]
+    )
+    report = analyze(parsed, "test.eml", run_intel=False, auth_source="unknown_capture")
+
+    assert report["risk_score"] == 80  # 30 SPF + 25 DKIM + 25 DMARC
+    assert report["risk_level"] == "HIGH"
+    assert report["disposition"] == "suspicious_escalate"
+    assert {finding["check"] for finding in report["findings"]} == {
+        "spf_failure", "dkim_failure", "dmarc_failure"
+    }
+    assert report["authentication_evidence"]["spf"]["score_status"] == "fail"
+    assert report["authentication_evidence"]["spf"]["scored_because"] == "recorded_failure"
+
+
+def test_absent_authentication_results_are_not_scored_when_untrusted():
+    """'missing' is not a recorded failure — stripping a header is free."""
+    parsed = _minimal_parsed(authentication_results=[])
+    report = analyze(parsed, "test.eml", run_intel=False, auth_source="unknown_capture")
+
+    assert report["risk_score"] == 0
+    assert report["authentication_evidence"]["spf"]["score_status"] == "untrusted"
+
+
+def test_mailing_list_headers_soften_an_untrusted_auth_failure():
+    """A list that rewrites a message breaks DKIM/DMARC as a side effect.
+
+    The failure stays visible as evidence, at reduced weight and confidence,
+    rather than escalating ordinary list traffic.
+    """
+    parsed = _minimal_parsed(
+        authentication_results=["mx.example.com; spf=pass; dkim=fail; dmarc=fail"],
+        list_id="Community discussion <dev-list.example.com>",
+    )
+    report = analyze(parsed, "test.eml", run_intel=False, auth_source="unknown_capture")
+
+    findings = {finding["check"]: finding for finding in report["findings"]}
+    assert set(findings) == {"dkim_failure", "dmarc_failure"}
+    assert findings["dkim_failure"]["weight"] == 12  # halved from 25
+    assert findings["dkim_failure"]["confidence"] == "low"
+    assert "reduced weight" in findings["dkim_failure"]["false_positive_note"]
+    assert report["risk_score"] == 24
+    assert report["disposition"] == "likely_benign"
+
+
+def test_declared_trusted_gateway_overrides_relay_softening():
+    """When the analyst vouches for the header, full weights apply."""
+    parsed = _minimal_parsed(
+        authentication_results=["mx.example.com; spf=pass; dkim=fail; dmarc=fail"],
+        list_id="Community discussion <dev-list.example.com>",
+    )
+    report = analyze(parsed, "test.eml", run_intel=False, auth_source="trusted_gateway")
+
+    findings = {finding["check"]: finding for finding in report["findings"]}
+    assert findings["dkim_failure"]["weight"] == 25
+    assert findings["dkim_failure"]["confidence"] == "medium"
 
 
 def test_repeated_findings_have_unique_instance_ids():
@@ -428,16 +500,22 @@ def test_repeated_findings_have_unique_instance_ids():
     assert report["risk_score"] == 40
 
 
-def test_default_cli_preserves_untrusted_auth_without_scoring_it(tmp_path, phishing_test_eml):
+def test_default_cli_scores_recorded_auth_failures(tmp_path, phishing_test_eml):
+    """End to end through the CLI with no flags: failures count, and say why."""
     output_path = tmp_path / "report.json"
     result = subprocess.run(
-        [sys.executable, "main.py", "-f", phishing_test_eml, "-n", "-o", "json", "--no-banner", "-O", str(output_path)],
+        [sys.executable, "main.py", "-f", phishing_test_eml, "-o", "json", "--no-banner", "-O", str(output_path)],
         cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=30,
     )
     assert result.returncode == 0, result.stderr
     report = json.loads(output_path.read_text(encoding="utf-8"))
-    assert report["authentication_evidence"]["source_context"] == "unknown_capture"
-    assert report["authentication_evidence"]["spf"]["score_status"] == "untrusted"
+    evidence = report["authentication_evidence"]
+
+    assert evidence["source_context"] == "unknown_capture"
+    assert evidence["spf"]["score_status"] == "fail"
+    assert evidence["spf"]["scored_because"] == "recorded_failure"
+    assert "spf_failure" in {finding["check"] for finding in report["findings"]}
+    assert report["risk_level"] == "HIGH"
 
 
 class TestSuspiciousUrlScoring:

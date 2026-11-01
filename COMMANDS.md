@@ -73,9 +73,21 @@ configured API keys, contact AbuseIPDB or VirusTotal. VirusTotal results are
 lookup-only by default; add `--submit-unknown-urls` when you explicitly approve
 submitting URLs that VirusTotal has not seen before. Use `--auth-source`
 (`unknown_capture`, `trusted_gateway`, or `untrusted_capture`) to preserve the
-provenance of Authentication-Results headers in JSON reports. Authentication
-results affect scoring only for `trusted_gateway`; the other values preserve
-the evidence but do not trust it for scoring.
+provenance of Authentication-Results headers in JSON reports.
+
+A recorded authentication **failure** (`fail`, `softfail`, `permerror`) is
+scored under every `--auth-source` value, because a forged
+`Authentication-Results` header claims `pass`, not `fail`. A recorded `pass`,
+and an absent result, are scored only under `trusted_gateway`.
+`unknown_capture` and `untrusted_capture` behave identically for scoring and
+differ only in what the report records about provenance. Each finding's
+`scored_because` field says which rule applied.
+
+When a message carries mailing-list (`List-Id`, `List-Post`,
+`List-Unsubscribe`) or `Resent-From` headers, authentication failures are
+scored at half weight with `low` confidence, since legitimate relaying breaks
+SPF and DKIM as a side effect. `--auth-source trusted_gateway` overrides that
+softening.
 
 Email reports include the SOC L1 disposition (`likely_benign`,
 `suspicious_escalate`, `malicious_escalate`, or `insufficient_evidence`), a
