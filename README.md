@@ -65,7 +65,6 @@ These are confirmed misses or false positives, tracked on the roadmap below. Ana
 - DNS records show what a domain publishes, not what happened at delivery.
 - Domain extraction uses a bundled public-suffix snapshot; update the dependency periodically. When the snapshot does not recognise a suffix, the registrable domain falls back to the last two labels, so an unknown TLD cannot make `paypal.com.evil.<new-tld>` read as the real PayPal.
 - Enrichment coverage depends on API keys, availability, and rate limits.
-- **Python 3.10 cannot install a vulnerability-free dependency set.** `dnspython` below 2.9.0 carries CVE-2026-114605 (excessive CPU use parsing DNS wire data, reachable only via `--enrich`), and `filelock` below 4.2.1 — a transitive dependency of `tldextract` — carries 17 further advisories. Both fixes require Python 3.11+, so neither can be installed on 3.10 while this project supports it. `pip-audit` reports these on the 3.10 job. **Run Python 3.11 or later.**
 - Repeated hits of one rule stay visible as evidence but score only once.
 
 ## Installation
