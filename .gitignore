@@ -218,3 +218,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Claude Code local state (project skills, settings, worktrees). Kept out of
+# version control deliberately; see the user-level phishguard-verify skill.
+.claude/
