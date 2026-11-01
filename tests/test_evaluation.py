@@ -1,5 +1,6 @@
 """Tests for the offline L1 evaluation harness."""
 
+import sys
 from pathlib import Path
 
 from evaluation.run import evaluate_cases
@@ -119,3 +120,51 @@ def test_default_cli_mode_does_not_regress():
     assert {result["auth_source"] for result in report["results"]} == {DEFAULT_CLI_AUTH_SOURCE}
     assert report["metrics"]["recall"] >= DEFAULT_MODE_RECALL_FLOOR
     assert report["metrics"]["false_positive_rate"] <= DEFAULT_MODE_MAX_FALSE_POSITIVE_RATE
+
+
+# Second ratchet: the same corpus with trusted receiving servers configured, so
+# a 'pass' from them is believed. Measured 2026-11-01 on the 51-case corpus:
+# recall 1.0, FPR 0.0, identical to the unconfigured headline above.
+#
+# Both numbers are published and both are guarded, because configuring servers
+# changes what the tool may believe and could regress either way. In particular
+# a matched authserv-id must NOT cancel relay softening: when it did, both
+# mailing-list fixtures escalated and this ceiling caught it at FPR 8%.
+CONFIGURED_MODE_RECALL_FLOOR = 1.0
+CONFIGURED_MODE_MAX_FALSE_POSITIVE_RATE = 0.0
+
+
+def test_configured_mode_does_not_regress():
+    import json
+
+    from evaluation.run import CORPUS_TRUSTED_AUTHSERV_IDS, DEFAULT_CLI_AUTH_SOURCE
+
+    repo_root = Path(__file__).parent.parent
+    cases = json.loads((repo_root / "evaluation" / "cases.json").read_text(encoding="utf-8"))
+    cases += build_synthetic_cases()
+
+    report = evaluate_cases(
+        repo_root,
+        cases,
+        auth_source_override=DEFAULT_CLI_AUTH_SOURCE,
+        trusted_authserv_ids=CORPUS_TRUSTED_AUTHSERV_IDS,
+    )
+
+    assert report["metrics"]["recall"] >= CONFIGURED_MODE_RECALL_FLOOR
+    assert report["metrics"]["false_positive_rate"] <= CONFIGURED_MODE_MAX_FALSE_POSITIVE_RATE
+
+
+def test_both_published_modes_are_present_in_the_report():
+    """The harness must publish the unconfigured number, not only the better one."""
+    import json
+    import subprocess
+
+    repo_root = Path(__file__).parent.parent
+    completed = subprocess.run(
+        [sys.executable, "-m", "evaluation.run", "--include-synthetic"],
+        cwd=repo_root, capture_output=True, text=True, check=True,
+    )
+    report = json.loads(completed.stdout)
+
+    assert report["default_cli_mode"]["trusted_authserv_ids"] == []
+    assert report["configured_mode"]["trusted_authserv_ids"]

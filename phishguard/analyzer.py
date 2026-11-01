@@ -33,6 +33,7 @@ def analyze(
     run_intel: bool = False,
     submit_unknown_urls: bool = False,
     auth_source: str = "unknown_capture",
+    trusted_authserv_ids: tuple[str, ...] = (),
 ) -> dict:
     """
     Build a structured alert report from parsed email data.
@@ -42,6 +43,11 @@ def analyze(
         file_path:  Path to the original .eml file (used for display only)
         run_intel:  If True, perform external DNS and threat-intelligence
                     enrichment. Defaults to False for fully offline analysis.
+        trusted_authserv_ids: Hostnames your own receiving servers write as the
+                    authserv-id in Authentication-Results (e.g. "mx.example.com").
+                    When given, a result counts as verified only if it came from
+                    one of them (RFC 8601 section 5). This governs whether a
+                    `pass` is believed; recorded failures score either way.
 
     Returns:
         A fully structured report dict ready for text/JSON/HTML/CEF output.
@@ -81,19 +87,28 @@ def analyze(
         score += score_contribution
 
     # --- SPF / DKIM / DMARC interpretation ---
-    auth_trusted = auth_source == "trusted_gateway"
-    auth_evidence = _interpret_authentication(parsed, trusted=auth_trusted)
+    auth_evidence = _interpret_authentication(
+        parsed,
+        trusted=auth_source == "trusted_gateway",
+        trusted_authserv_ids=trusted_authserv_ids,
+    )
     spf_status = auth_evidence["spf"]["score_status"]
     dkim_status = auth_evidence["dkim"]["score_status"]
     dmarc_status = auth_evidence["dmarc"]["score_status"]
 
     # A mailing list or resending relay breaks authentication as a side effect
-    # of doing its job, so an unverified failure on such a message is weaker
-    # evidence. The finding stays visible either way; only its weight and
-    # confidence drop, and only when the analyst has not vouched for the
-    # header's provenance.
+    # of doing its job, so a failure on such a message is weaker evidence. The
+    # finding stays visible either way; only its weight and confidence drop.
+    #
+    # This asks a different question from provenance, and the two must not be
+    # conflated. Verifying *who wrote* the header (a matched authserv-id) tells
+    # us the failure is real; it says nothing about whether a list caused it, so
+    # it must not cancel the softening — doing so escalates legitimate list
+    # traffic the moment an analyst configures their own servers. Only the
+    # analyst explicitly vouching for the capture overrides it, because that is
+    # a human saying "I know what this message is".
     relay_indicators = auth_evidence["spf"]["relay_context"]
-    soften_auth = bool(relay_indicators) and not auth_trusted
+    soften_auth = bool(relay_indicators) and auth_source != "trusted_gateway"
 
     def auth_weight(base: int) -> int:
         return base // 2 if soften_auth else base
@@ -398,7 +413,12 @@ def analyze(
             "dkim":  "present" if parsed["dkim"] else "missing",
             "dmarc": parsed["dmarc"],
         },
-        "authentication_evidence": {**auth_evidence, "source_context": auth_source},
+        "authentication_evidence": {
+            **auth_evidence,
+            "source_context": (
+                "trusted_authserv_id" if auth_evidence["matched_authserv_id"] else auth_source
+            ),
+        },
         "dns_validation": dns_results,
         "iocs": {
             "urls":        parsed["urls"],
@@ -580,16 +600,63 @@ def _relay_context(parsed: dict) -> list[str]:
     return [name for name in _RELAY_CONTEXT_HEADERS if parsed.get(name)]
 
 
-def _interpret_authentication(parsed: dict, trusted: bool = False) -> dict:
+def _authserv_id(header_value: object) -> str:
+    """Return the authserv-id of an Authentication-Results header.
+
+    RFC 8601: the header starts with the authserv-id, optionally followed by a
+    version number, then ';'. "mx.example.com 1; spf=pass" -> "mx.example.com".
+    """
+    head = str(header_value).split(";", 1)[0].strip()
+    return head.split()[0].lower().rstrip(".") if head else ""
+
+
+def _interpret_authentication(
+    parsed: dict,
+    trusted: bool = False,
+    trusted_authserv_ids: tuple[str, ...] = (),
+) -> dict:
     """Interpret authentication results and decide what may be scored.
 
-    Scoring is allowed for a result when either the analyst has declared the
-    header's provenance trustworthy (``--auth-source trusted_gateway``), or
+    Scoring is allowed for a result when either its provenance is verified, or
     the result is a failure the receiver recorded — see
     ``_RECORDED_AUTH_FAILURES`` for why those two cases differ.
+
+    Provenance is verified in one of two ways. ``--auth-source
+    trusted_gateway`` is the analyst vouching for the whole capture. Naming
+    receiving servers in ``trusted_authserv_ids`` is narrower and stronger:
+    anyone can write an Authentication-Results header, so we look for the
+    topmost one carrying an authserv-id we were told to expect. A gateway adds
+    its header above whatever the sender supplied, so the topmost match is our
+    own server's verdict and anything below it is hearsay.
+
+    When ids are configured but none matches, nothing is verified — but the
+    headers are still *read*, because a recorded failure is self-authenticating
+    whoever wrote it. Forging ``dmarc=fail`` against yourself achieves nothing,
+    so dropping those results would reintroduce a silent miss. Configuring ids
+    therefore changes whether a ``pass`` is believed, never whether a failure
+    is seen.
     """
-    authentication_headers = parsed.get("authentication_results") or []
-    closest_result = str(authentication_headers[0]) if authentication_headers else str(parsed.get("dmarc", ""))
+    authentication_headers = [str(header) for header in (parsed.get("authentication_results") or [])]
+    wanted_ids = {
+        value.strip().lower().rstrip(".")
+        for value in trusted_authserv_ids
+        if value and value.strip()
+    }
+    matched_authserv_id = None
+    if wanted_ids:
+        own_headers = [header for header in authentication_headers if _authserv_id(header) in wanted_ids]
+        if own_headers:
+            # Our own server's verdict supersedes the blanket declaration and
+            # anything the sender attached below it.
+            trusted = True
+            matched_authserv_id = _authserv_id(own_headers[0])
+            authentication_headers = own_headers[:1]
+        else:
+            trusted = False
+
+    closest_result = (
+        authentication_headers[0] if authentication_headers else str(parsed.get("dmarc", ""))
+    )
 
     def result_for(mechanism: str) -> tuple[str, str]:
         match = re.search(
@@ -627,7 +694,8 @@ def _interpret_authentication(parsed: dict, trusted: bool = False) -> dict:
             "status": status,
             "score_status": status if (trusted or recorded_failure) else "untrusted",
             "scored_because": (
-                "analyst_declared_trusted_gateway" if trusted
+                "verified_own_authserv_id" if matched_authserv_id
+                else "analyst_declared_trusted_gateway" if trusted
                 else "recorded_failure" if recorded_failure
                 else "not_scored_unverified_provenance"
             ),
@@ -653,11 +721,61 @@ def _interpret_authentication(parsed: dict, trusted: bool = False) -> dict:
             dmarc_status or "missing", dmarc_source,
             "Domain-alignment evaluation recorded by the receiving system.",
         ),
-        "caution": (
-            "Authentication-Results is trusted only when added by the analyst's "
-            "known receiving infrastructure; PhishGuard cannot establish that trust boundary."
-        ),
+        "trusted_authserv_ids": sorted(wanted_ids),
+        "matched_authserv_id": matched_authserv_id,
+        "scoring_mode": _authentication_scoring_mode(wanted_ids, matched_authserv_id, trusted),
+        "caution": _authentication_caution(wanted_ids, matched_authserv_id, trusted),
     }
+
+
+AUTH_SCORING_MODES = (
+    "verified_authserv_id",     # a named receiving server stamped this header
+    "authserv_id_no_match",     # ids configured, but none of them wrote a header here
+    "trusted_gateway",          # blanket trust declared for the whole capture
+    "failures_only",            # nothing configured: failures score, passes do not
+)
+
+
+def _authentication_scoring_mode(
+    wanted_ids: set[str], matched: Optional[str], trusted: bool
+) -> str:
+    """Summarise in one stable token how much of SPF/DKIM/DMARC can be believed."""
+    if matched:
+        return "verified_authserv_id"
+    if wanted_ids:
+        return "authserv_id_no_match"
+    return "trusted_gateway" if trusted else "failures_only"
+
+
+def _authentication_caution(
+    wanted_ids: set[str], matched: Optional[str], trusted: bool
+) -> str:
+    """Explain to the analyst exactly how far the authentication results were believed."""
+    if matched:
+        return (
+            f"Scored from the Authentication-Results header written by {matched}, a "
+            "receiving server you named. This relies on that server stripping inbound "
+            "headers that claim its own authserv-id (RFC 8601 section 5)."
+        )
+    if wanted_ids:
+        return (
+            "No Authentication-Results header from a configured receiving server "
+            f"({', '.join(sorted(wanted_ids))}) was found, so no 'pass' here is believed. "
+            "Recorded failures are still scored, because forging a failure against "
+            "oneself gains an attacker nothing. The message may not have passed through "
+            "that server, or the capture may have dropped the header."
+        )
+    if trusted:
+        return (
+            "Authentication-Results was believed in full because the analyst declared "
+            "the capture came from a trusted gateway (--auth-source trusted_gateway)."
+        )
+    return (
+        "Recorded failures are scored, but no 'pass' is believed: anyone can write an "
+        "Authentication-Results header claiming success. Name your receiving servers "
+        "with --trusted-authserv-id (or PHISHGUARD_TRUSTED_AUTHSERV_IDS) to make a "
+        "pass count for something."
+    )
 
 
 def _normalized_comparison_domain(value: str) -> str:

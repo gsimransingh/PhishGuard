@@ -126,8 +126,9 @@ def _colorize_risk(level: object, text: str, enabled: bool) -> str:
 # Output Formatters
 # ---------------------------------------------------------------------------
 
-def print_text_report(report: dict, out=sys.stdout, color: bool = False) -> str: # type: ignore
+def print_text_report(report: dict, out=None, color: bool = False) -> str: # type: ignore
     """Print a human-readable summary of the report."""
+    out = out if out is not None else sys.stdout
     sep = "=" * 60
     lines = []
     lines.append(sep) # type: ignore
@@ -141,6 +142,8 @@ def print_text_report(report: dict, out=sys.stdout, color: bool = False) -> str:
     lines.append(f"  Disposition: {_safe_terminal_text(report.get('disposition', 'unknown'))}")
     lines.append(f"  Priority   : {_safe_terminal_text(triage.get('priority', 'P3'))}")
     lines.append(f"  Confidence : {_safe_terminal_text(triage.get('confidence', 'low'))}")
+    auth_mode = report.get("authentication_evidence", {}).get("scoring_mode", "failures_only")
+    lines.append(f"  Auth trust : {_safe_terminal_text(_AUTH_SCORING_LABELS.get(auth_mode, auth_mode))}")
     lines.append(f"  Why        : {_safe_terminal_text(triage.get('escalation_reason', 'No strong detection evidence was recorded.'))}")
     if triage.get("recommended_actions"):
         lines.append("  Next Steps :")
@@ -226,8 +229,9 @@ def print_text_report(report: dict, out=sys.stdout, color: bool = False) -> str:
     return output
 
 
-def print_url_report(report: dict, out=sys.stdout, color: bool = False) -> str: # type: ignore
+def print_url_report(report: dict, out=None, color: bool = False) -> str: # type: ignore
     """Print a human-readable summary of a standalone URL analysis."""
+    out = out if out is not None else sys.stdout
     sep = "=" * 60
     lines = []
     lines.append(sep) # type: ignore
@@ -281,8 +285,9 @@ def print_url_report(report: dict, out=sys.stdout, color: bool = False) -> str: 
 
 
 
-def print_batch_summary(results: list[dict], out=sys.stdout, color: bool = False) -> str: # type: ignore
+def print_batch_summary(results: list[dict], out=None, color: bool = False) -> str: # type: ignore
     """Print a summary table of batch analysis results."""
+    out = out if out is not None else sys.stdout
     sep = "=" * 70
     lines = []
     display_lines = []
@@ -377,6 +382,41 @@ def export_csv(results: list[dict], csv_path: str): # type: ignore
 # Single File Analysis
 # ---------------------------------------------------------------------------
 
+TRUSTED_AUTHSERV_IDS_ENV = "PHISHGUARD_TRUSTED_AUTHSERV_IDS"
+
+_AUTH_SCORING_LABELS = {
+    "verified_authserv_id": "full (header from a receiving server you named)",
+    "authserv_id_no_match": "failures only (no header from a configured server)",
+    "trusted_gateway": "full (blanket --auth-source trusted_gateway)",
+    "failures_only": f"failures only (set {TRUSTED_AUTHSERV_IDS_ENV} to believe a pass)",
+}
+
+
+def _resolve_trusted_authserv_ids(args: argparse.Namespace) -> tuple[str, ...]:
+    """Return trusted authserv-ids from --trusted-authserv-id, else the environment.
+
+    The command-line flag wins, so a one-off run can override the standing
+    configuration. The environment variable holds a comma-separated list.
+    """
+    from_flag = getattr(args, "trusted_authserv_id", None)
+    if from_flag:
+        return tuple(value.strip() for value in from_flag if value and value.strip())
+    from_env = os.environ.get(TRUSTED_AUTHSERV_IDS_ENV, "")
+    return tuple(value.strip() for value in from_env.split(",") if value.strip())
+
+
+def _warn_if_auth_unconfigured(args: argparse.Namespace, trusted_ids: tuple[str, ...]) -> None:
+    """Tell the analyst once per run when an authentication 'pass' cannot be believed."""
+    if trusted_ids or getattr(args, "auth_source", "unknown_capture") == "trusted_gateway":
+        return
+    print(
+        "[!] No trusted receiving server configured: recorded SPF/DKIM/DMARC failures "
+        "are still scored, but a 'pass' is not believed and cannot lower risk. Set "
+        f"{TRUSTED_AUTHSERV_IDS_ENV}=mx.yourcompany.com (or pass --trusted-authserv-id).",
+        file=sys.stderr,
+    )
+
+
 def _save_output(path: str, content: str) -> None:
     """Write a report to disk, failing with a clean message instead of a traceback."""
     try:
@@ -394,10 +434,12 @@ def _save_output(path: str, content: str) -> None:
 
 def run_single(args: argparse.Namespace):
     """Handle single file analysis."""
+    trusted_ids = _resolve_trusted_authserv_ids(args)
     if not os.path.isfile(args.file):
         print(f"[ERROR] File not found: {_safe_terminal_text(args.file)}", file=sys.stderr)
         sys.exit(1)
 
+    _warn_if_auth_unconfigured(args, trusted_ids)
     print(f"[*] Parsing {_safe_terminal_text(args.file)} ...", file=sys.stderr)
     try:
         parsed = parse_eml(args.file) # type: ignore
@@ -407,6 +449,7 @@ def run_single(args: argparse.Namespace):
             run_intel=args.enrich,
             submit_unknown_urls=getattr(args, "submit_unknown_urls", False),
             auth_source=getattr(args, "auth_source", "unknown_capture"),
+            trusted_authserv_ids=trusted_ids,
         ) # type: ignore
     except EmailLimitError as error:
         print(f"[ERROR] Input rejected: {_safe_terminal_text(error)}", file=sys.stderr)
@@ -468,6 +511,7 @@ def run_url(args: argparse.Namespace):
 def run_batch(args: argparse.Namespace):
     """Handle batch folder analysis."""
     folder = args.folder
+    trusted_ids = _resolve_trusted_authserv_ids(args)
     output_format = getattr(args, "output", "text")
     if output_format == "html":
         print(
@@ -497,6 +541,7 @@ def run_batch(args: argparse.Namespace):
         sys.exit(2)
 
     print(f"[*] Found {len(eml_files)} .eml file(s) in {_safe_terminal_text(folder)}", file=sys.stderr) # type: ignore
+    _warn_if_auth_unconfigured(args, trusted_ids)
 
     results = []
     had_errors = False
@@ -511,6 +556,7 @@ def run_batch(args: argparse.Namespace):
                 run_intel=args.enrich,
                 submit_unknown_urls=getattr(args, "submit_unknown_urls", False),
                 auth_source=getattr(args, "auth_source", "unknown_capture"),
+                trusted_authserv_ids=trusted_ids,
             ) # type: ignore
             results.append(report) # type: ignore
 
@@ -626,6 +672,18 @@ Examples:
         choices=["unknown_capture", "trusted_gateway", "untrusted_capture"],
         default="unknown_capture",
         help="Provenance of authentication headers in the analyzed message",
+    )
+
+    parser.add_argument(
+        "--trusted-authserv-id",
+        action="append",
+        metavar="HOST",
+        help=(
+            "Hostname your receiving mail server writes at the start of "
+            "Authentication-Results (e.g. mx.example.com). Only the topmost header "
+            f"from these hosts is believed for a 'pass'. Repeatable. Defaults to "
+            f"${TRUSTED_AUTHSERV_IDS_ENV} (comma-separated)."
+        ),
     )
 
     color_group = parser.add_mutually_exclusive_group()

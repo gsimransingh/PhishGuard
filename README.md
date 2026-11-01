@@ -24,7 +24,14 @@ PhishGuard is **pre-1.0**. Detection quality is measured on an offline corpus an
 
 | Run mode | Accuracy | Phishing recall | False-positive rate |
 | --- | --- | --- | --- |
-| Default CLI (`--auth-source unknown_capture`) | 100% | **100%** (26/26) | 0% |
+| Default CLI, no configuration — **headline** | 100% | **100%** (26/26) | 0% |
+| With trusted receiving servers configured | 100% | 100% (26/26) | 0% |
+
+Both numbers are published, and both are enforced as a recall floor plus a
+false-positive ceiling in `tests/test_evaluation.py`. The headline is
+deliberately the **unconfigured** one: it is what an analyst gets before doing
+any setup, so it cannot flatter the tool. Reproduce both with
+`python -m evaluation.run --include-synthetic --summary`.
 
 **Read that 100% as "this corpus has stopped discriminating", not as "detection is finished".** Ten confirmed gaps are still open below, and the corpus has a case for almost none of them: a credential-harvesting `<form>` with no `<a href>`, a backslash URL, and a display name hiding a Reply-To mismatch are all unmeasured here. A sender-domain lookalike with no links and legitimate brand mail — both unmeasured when this was written — now have cases. The number is a regression floor, not an accuracy claim.
 
@@ -40,7 +47,7 @@ Earlier versions of this README reported 100% accuracy. That figure came from an
 
 | Area | Checks | Scored by default |
 | --- | --- | --- |
-| Authentication | SPF, DKIM, DMARC results from `Authentication-Results` / `Received-SPF`; DKIM signature presence | Recorded **failures** always; `pass` and `missing` only with `--auth-source trusted_gateway` |
+| Authentication | SPF, DKIM, DMARC results from `Authentication-Results` / `Received-SPF`; DKIM signature presence | Recorded **failures** always; a `pass` only once you name your receiving servers (below) or pass `--auth-source trusted_gateway` |
 | Sender | Reply-To vs From mismatch; typosquat and combosquat of the `From` domain; brand named in the display name that the sending domain does not own | Yes |
 | Links | HTML link text vs real destination; IP hosts, `@` tricks, deep subdomains, abused TLDs, non-standard ports, punycode; typosquat and combosquat against a curated brand list | Yes |
 | Attachments | Risky and active-content extensions, double extensions, bidirectional-text filenames, executable MIME type vs filename, **file signature vs extension**; SHA-256 per attachment; found regardless of `Content-Disposition` | Yes |
@@ -124,7 +131,46 @@ phishguard -f samples/phishing_test.eml --enrich --submit-unknown-urls
 
 # Record where Authentication-Results headers came from
 phishguard -f samples/phishing_test.eml --auth-source trusted_gateway
+
+# Believe an Authentication-Results header from a named receiving server
+phishguard -f samples/phishing_test.eml --trusted-authserv-id mx.example.com
 ```
+
+## Name your receiving servers
+
+Optional, and worth doing once. It does not change whether failures are
+caught — those are always scored — but it is what lets a `pass` count in your
+favour and stop a legitimate message looking unverified.
+
+Anyone can write an `Authentication-Results` header, so PhishGuard believes a
+`pass` only from a server you name (RFC 8601 §5).
+
+1. Open any email your organisation received and view its raw headers.
+2. Find the **topmost** `Authentication-Results:` header. The text before the
+   first `;` is the authserv-id — `mx.example.com` in
+   `Authentication-Results: mx.example.com; spf=pass ...`.
+3. Set it, comma-separating several servers:
+
+```bash
+export PHISHGUARD_TRUSTED_AUTHSERV_IDS="mx.example.com"
+```
+
+```powershell
+# Current session
+$env:PHISHGUARD_TRUSTED_AUTHSERV_IDS="mx.example.com"
+# Persist for your user account (new terminals)
+setx PHISHGUARD_TRUSTED_AUTHSERV_IDS "mx.example.com"
+```
+
+The report's `Auth trust` line then reads `full (header from a receiving
+server you named)`, and the startup warning disappears.
+`--trusted-authserv-id` overrides the variable for one run and is repeatable.
+
+Two caveats worth knowing. This relies on your gateway stripping inbound
+headers that claim its own authserv-id, as RFC 8601 §5 requires — most do, but
+check yours. And `--auth-source trusted_gateway` still exists for captures you
+vouch for entirely; it believes *every* `Authentication-Results` header in the
+message, forged ones included, so prefer naming your servers.
 
 ## Terminal colors
 
@@ -246,16 +292,20 @@ Bounded parsing of hostile input, offline-by-default operation, safe HTML/CEF/CS
 
 **Exit criterion met:** `python -m evaluation.run --include-synthetic --summary` reproduces the default-mode metrics published above, and prints every miss.
 
-### 0.7: No silent misses (next)
+### 0.7: No silent misses — shipped
 
 - [x] Score recorded authentication **failures** regardless of header provenance; keep ignoring unverified `pass` and `missing`
 - [x] Benign corpus contains mail that legitimately fails authentication (forwarded, mailing list), so the false-positive ceiling is measurable
 - [x] Relay-aware softening so legitimate list traffic does not escalate on a broken DKIM signature
 - [x] Detect attachments regardless of `Content-Disposition`; check file signatures; report SHA-256 per attachment
 - [x] Any direct malicious signal escalates to at least `suspicious_escalate`, whatever the total score
-- [ ] `--trusted-authserv-id`: trust a `pass` only when stamped by your own receiving servers (RFC 8601 §5)
+- [x] `--trusted-authserv-id` / `PHISHGUARD_TRUSTED_AUTHSERV_IDS`: believe a `pass` only when stamped by your own receiving servers (RFC 8601 §5)
+- [x] Warn on every unconfigured run; every report states how far authentication was believed
+- [x] Evaluation publishes both the unconfigured (headline) and configured metrics, each with its own ratchet
 
-**Exit criterion met:** default-mode phishing recall is 100% (23/23) with the false-positive rate still 0%, against a benign set that now includes mail which legitimately fails authentication. The `--trusted-authserv-id` box stays open: it is what would let a `pass` count for something, which matters for ranking rather than for recall.
+**Exit criterion met:** phishing recall is 100% (26/26) with the false-positive rate at 0%, against a benign set that includes mail which legitimately fails authentication — and it holds in both run modes, configured and not.
+
+Naming your receiving servers changes what a `pass` is worth, not whether a failure is caught, so it moves ranking rather than recall. That is why the headline metric stays the unconfigured one.
 
 Weights and thresholds remain uncalibrated against each other — the heaviest direct signal is 40 against a HIGH threshold of 70, so `malicious_escalate` is still hard to reach offline. The disposition floor added here routes around that rather than fixing it; the arithmetic belongs in 0.8.
 
