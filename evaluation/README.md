@@ -9,21 +9,31 @@ The evaluation manifest defines the current SOC L1 disposition contract:
 
 ## Headline metric: default CLI mode
 
-Every report now includes a `default_cli_mode` block that scores **every case
-with `auth_source=unknown_capture`**, which is what an analyst gets when
-running the CLI with no flags. Treat this as the headline number. The
-per-case `auth_source` labels are still reported, but they can leak the
-expected answer: if only phishing cases are labelled `trusted_gateway`, only
-phishing cases get credit for authentication failures.
+Every report includes a `default_cli_mode` block that scores **every case with
+`auth_source=unknown_capture` and nothing configured**, which is what an
+analyst gets when running the CLI with no flags and no setup. Treat this as
+the headline number. The per-case `auth_source` labels are still reported, but
+they can leak the expected answer: if only phishing cases are labelled
+`trusted_gateway`, only phishing cases get credit for authentication failures.
 
-Quick summary, including every default-mode miss:
+A second block, `configured_mode`, scores the same cases with
+`CORPUS_TRUSTED_AUTHSERV_IDS` supplied — the evaluation equivalent of a SOC
+setting `PHISHGUARD_TRUSTED_AUTHSERV_IDS` to its own receiving servers, so a
+`pass` from them is believed. Both are published deliberately. Reporting only
+the configured figure would hide what the tool does before anyone configures
+it, and the unconfigured number stays the headline for that reason.
+
+Quick summary, including every miss in both modes:
 
 ```powershell
 python -m evaluation.run --include-synthetic --summary
 ```
 
 `tests/test_evaluation.py` enforces a recall floor and false-positive ceiling
-for default mode. Raise the floor whenever a fix lands; never lower it.
+for **each** mode. Raise a floor whenever a fix lands; never lower it. The
+configured ceiling earns its keep: when a matched authserv-id was first
+allowed to cancel relay softening, both mailing-list fixtures escalated and
+that ceiling caught it at 8%.
 
 The false-positive ceiling is only meaningful while the benign half of the
 corpus contains mail that legitimately fails authentication: forwarded

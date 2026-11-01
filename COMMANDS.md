@@ -83,11 +83,30 @@ and an absent result, are scored only under `trusted_gateway`.
 differ only in what the report records about provenance. Each finding's
 `scored_because` field says which rule applied.
 
+`--trusted-authserv-id HOST` (repeatable, or `PHISHGUARD_TRUSTED_AUTHSERV_IDS`
+as a comma-separated list) is the narrower and preferred way to make a `pass`
+count. It believes only the topmost `Authentication-Results` header whose
+authserv-id — the text before the first `;` — is one you named, per RFC 8601
+section 5; a gateway writes its header above whatever the sender supplied, so
+anything below the match is hearsay. The flag overrides the environment
+variable for one run, and `authentication_evidence.scoring_mode` reports which
+of `verified_authserv_id`, `authserv_id_no_match`, `trusted_gateway` or
+`failures_only` applied. Unlike `--auth-source trusted_gateway`, which
+believes every such header in the message, this names the one server you
+actually control.
+
+Configuring ids never hides a failure. With ids set and no matching header,
+recorded failures still score — withholding them would create a silent miss —
+and only belief in a `pass` is withheld. Runs with nothing configured print a
+one-line warning to stderr saying so.
+
 When a message carries mailing-list (`List-Id`, `List-Post`,
 `List-Unsubscribe`) or `Resent-From` headers, authentication failures are
 scored at half weight with `low` confidence, since legitimate relaying breaks
-SPF and DKIM as a side effect. `--auth-source trusted_gateway` overrides that
-softening.
+SPF and DKIM as a side effect. Only `--auth-source trusted_gateway` overrides
+that softening; a matched authserv-id deliberately does not, because knowing
+which server recorded a broken signature says nothing about whether a mailing
+list broke it.
 
 Email reports include the SOC L1 disposition (`likely_benign`,
 `suspicious_escalate`, `malicious_escalate`, or `insufficient_evidence`), a

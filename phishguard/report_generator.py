@@ -25,6 +25,17 @@ def generate_html_report(report: dict, output_path: str = None) -> str:
     metadata = report["email_metadata"]
     iocs = report["iocs"]
     triage = report.get("triage", {})
+    auth_evidence = report.get("authentication_evidence", {})
+    auth_rows_html = ''.join(
+        '<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>'.format(
+            html_escape(mechanism.upper()),
+            html_escape(str(auth_evidence.get(mechanism, {}).get("status", "missing"))),
+            html_escape(str(auth_evidence.get(mechanism, {}).get("score_status", "untrusted"))),
+            html_escape(str(auth_evidence.get(mechanism, {}).get("scored_because", ""))),
+        )
+        for mechanism in ("spf", "dkim", "dmarc")
+        if isinstance(auth_evidence.get(mechanism), dict)
+    )
     actions_html = ''.join(
         f'<li>{html_escape(action)}</li>' for action in triage.get("recommended_actions", [])
     ) or '<li>Review the evidence and validate independently.</li>'
@@ -218,6 +229,12 @@ def generate_html_report(report: dict, output_path: str = None) -> str:
         <div class="section">
             <h2>Analyst Handoff</h2>
             <p><strong>Confidence:</strong> {html_escape(triage.get('confidence', 'low'))}</p>
+            <p><strong>Authentication trust:</strong> {html_escape(str(auth_evidence.get('scoring_mode', 'failures_only')))}</p>
+            <table>
+                <tr><th>Mechanism</th><th>Reported</th><th>Scored as</th><th>Why</th></tr>
+                {auth_rows_html}
+            </table>
+            <p class="attachment-detail">{html_escape(str(auth_evidence.get('caution', '')))}</p>
             <p><strong>Reason:</strong> {html_escape(triage.get('escalation_reason', 'No strong detection evidence was recorded.'))}</p>
             <p><strong>Recommended next steps:</strong></p>
             <ul>{actions_html}</ul>
