@@ -40,22 +40,25 @@ def test_synthetic_corpus_is_backed_by_eml_files():
     repo_root = Path(__file__).parent.parent
     cases = build_synthetic_cases()
 
-    assert len(cases) == 38
+    assert len(cases) == 44
     assert all((repo_root / case["path"]).is_file() for case in cases)
     assert all(case["path"].endswith(".eml") for case in cases)
     assert {case["source_type"] for case in cases} == {"synthetic_generated_eml"}
 
 
 # Ratchet for the headline metric. Raise these floors whenever a fix lands;
-# never lower them to make a change pass. Measured 2026-11-01 on the 45-case
-# corpus (7 fixtures + 38 synthetic) in default CLI mode. Earlier floors were
-# 10/21 (48%) and 20/21 (95%).
+# never lower them to make a change pass. Measured 2026-11-01 on the 51-case
+# corpus (7 fixtures + 44 synthetic) in default CLI mode, after the brand work
+# added 6 cases: 3 lookalike-sender/brand-URL phishing cases and 3 legitimate
+# Microsoft 365 / Amazon / Google notifications. Earlier floors were 10/21
+# (48%), 20/21 (95%) and 23/23 (100%) on 45 cases.
 #
 # The floor is now 1.0, which does NOT mean detection is finished — it means
-# this corpus has stopped discriminating. Fourteen confirmed gaps are still
-# open as strict xfails in tests/test_known_gaps.py, and none of them has a
-# case here. A saturated corpus is a reason to add harder cases (0.9: real
-# sanitized captures), not a reason to claim accuracy.
+# this corpus has stopped discriminating. Three confirmed gaps are still open
+# as strict xfails in tests/test_known_gaps.py (ten are documented in the
+# README), and none of those three has a case here. A saturated corpus is a
+# reason to add harder cases (0.9: real sanitized captures), not a reason to
+# claim accuracy.
 #
 # Keep this a recall floor and a false-positive ceiling, never an equality
 # assertion on accuracy: that was the shape of the withdrawn 100% claim.

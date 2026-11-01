@@ -29,7 +29,9 @@ import pytest
 from phishguard import cli
 from phishguard.url_analyzer import (
     InvalidURLError,
+    _allowed_edit_distance,
     _levenshtein,
+    brand_owned_domains,
     registrable_domain,
     analyze_url,
     check_domain_registration,
@@ -502,3 +504,149 @@ class TestAnalyzeUrl:
 
         assert result["risk_score"] >= 150
         assert result["risk_level"] == "CRITICAL"
+
+
+# ---------------------------------------------------------------------------
+# Brand matching rules: the owned-domain allowlist, length-scaled edit
+# distance, and word-boundary combosquat matching (0.8 "analyst trust")
+# ---------------------------------------------------------------------------
+
+class TestBrandOwnedDomains:
+    """A brand check must not fire on a domain that brand's owner operates."""
+
+    def test_brand_list_maps_every_brand_to_owned_domains(self):
+        brands = brand_owned_domains()
+
+        assert brands, "known_brands.json produced no brands"
+        assert "paypal" in brands
+        assert "paypal.com" in brands["paypal"]
+        assert all(isinstance(domains, frozenset) for domains in brands.values())
+
+    def test_brands_sharing_an_owner_share_its_domains(self):
+        # Microsoft owns Outlook and Office 365, so mail for one arriving from
+        # another's domain is not impersonation. This is why
+        # outlook.office365.com is not reported.
+        brands = brand_owned_domains()
+
+        assert brands["outlook"] == brands["microsoft"] == brands["office365"]
+        assert "office365.com" in brands["outlook"]
+
+    def test_owned_domain_suppresses_only_its_own_brand(self):
+        # amazonaws.com is Amazon's, so "amazonaws" is not an Amazon squat —
+        # but a PayPal phishing page hosted on it is still a PayPal squat.
+        # Suppressing every brand on a brand-operated hosting domain would
+        # turn the allowlist into a bypass for the most-abused hosts there are.
+        assert check_typosquatting("s3.amazonaws.com") == []
+
+        checks = [f["check"] for f in check_typosquatting("paypal-login.s3.amazonaws.com")]
+        assert "combosquatting" in checks
+
+    def test_corrupt_brand_file_falls_back_without_crashing(self):
+        # Fail-safe, not fail-silent: a missing or corrupted config must not
+        # take a scan down, and the fallback carries owned domains of its own
+        # so the failure mode is a shorter brand list, never an allowlist
+        # bypass on the brands it does still cover.
+        from phishguard.url_analyzer import _load_known_brands
+
+        _load_known_brands.cache_clear()
+        try:
+            with patch("phishguard.url_analyzer.open", side_effect=FileNotFoundError):
+                brands = brand_owned_domains()
+        finally:
+            _load_known_brands.cache_clear()  # don't leave the stub cached
+
+        assert "paypal" in brands
+        assert "paypal.com" in brands["paypal"]
+
+    def test_a_brand_list_without_domains_still_matches(self):
+        # The bare-list form used by most tests has no owned domains, so
+        # nothing is allowlisted and the matching rules are tested alone.
+        checks = [f["check"] for f in check_typosquatting("paypal-verify.ru", brands=["paypal"])]
+        assert "combosquatting" in checks
+
+
+class TestBrandWordBoundaryMatching:
+    """A brand buried inside a longer word is not a combosquat."""
+
+    @pytest.mark.parametrize("hostname", [
+        "www.purchase.com",   # contains "chase"
+        "pineapple.com",      # contains "apple"
+        "purchases.example",
+    ])
+    def test_brand_inside_a_word_is_not_matched(self, hostname):
+        assert check_typosquatting(hostname) == []
+
+    @pytest.mark.parametrize("hostname", [
+        "paypal-secure-login.ru",     # brand is its own token
+        "secure-paypal-login.com",    # brand is a token in the middle
+        "paypalsecure.com",           # brand at the start of a glued label
+        "securepaypal.com",           # brand at the end of a glued label
+        "paypal.verify-account.ru",   # brand as a subdomain
+    ])
+    def test_brand_at_a_word_boundary_is_matched(self, hostname):
+        checks = [f["check"] for f in check_typosquatting(hostname, brands=["paypal"])]
+        assert "combosquatting" in checks
+
+    def test_short_brand_is_not_matched_at_the_end_of_a_word(self):
+        # "chase" and "apple" are short enough that an accidental word ending
+        # is likely, so a suffix match needs a longer brand name.
+        assert check_typosquatting("mypurchase.example", brands=["chase"]) == []
+        assert check_typosquatting("mysecurechase.example", brands=["chase"]) == []
+
+    def test_brand_operated_tld_is_not_read_as_impersonation(self):
+        # The public suffix is dropped before labels are compared, so a brand
+        # TLD does not make every host under it an impersonation of itself.
+        assert check_typosquatting("support.apple", brands=["apple"]) == []
+
+
+class TestBrandEditDistanceScaling:
+    """Edit distance is only meaningful relative to the length of the word."""
+
+    @pytest.mark.parametrize("hostname,brand", [
+        ("abc.com", "hsbc"),       # 2 edits on a 4-character brand
+        ("globe.com", "adobe"),    # 2 edits on a 5-character brand
+        ("amazing.com", "amazon"), # 2 edits on a 6-character brand
+        ("ups.com", "usps"),       # 1 edit, but on a 3-character label
+    ])
+    def test_short_labels_are_not_typosquats(self, hostname, brand):
+        assert check_typosquatting(hostname, brands=[brand]) == []
+
+    @pytest.mark.parametrize("hostname,brand", [
+        ("paypa1.com", "paypal"),        # 1 edit
+        ("ebey.com", "ebay"),            # 1 edit on a 4-character brand
+        ("rnicrosoft.com", "microsoft"), # 2 edits, but on a 9-character brand
+    ])
+    def test_deliberate_lookalikes_are_still_typosquats(self, hostname, brand):
+        checks = [f["check"] for f in check_typosquatting(hostname, brands=[brand])]
+        assert "typosquatting" in checks
+
+    def test_allowed_distance_scales_with_the_shorter_string(self):
+        assert _allowed_edit_distance("hsbc", "abc") == 0
+        assert _allowed_edit_distance("adobe", "globe") == 1
+        assert _allowed_edit_distance("microsoft", "rnicrosoft") == 2
+
+
+class TestRegistrableDomainUnknownSuffix:
+    """An unrecognised public suffix must not fail open for the attacker."""
+
+    def test_unknown_suffix_falls_back_to_the_last_two_labels(self):
+        # The bundled snapshot is a point-in-time copy, so a TLD delegated
+        # after it was cut lands here. Returning the whole hostname made
+        # callers read the leftmost label as the registrable one.
+        assert registrable_domain("paypal.com.evil.example") == "evil.example"
+        assert registrable_domain("evil.example") == "evil.example"
+
+    def test_known_suffix_is_unaffected(self):
+        assert registrable_domain("paypal.com.evil.ru") == "evil.ru"
+        assert registrable_domain("login.example.co.uk") == "example.co.uk"
+
+    def test_single_label_and_ip_literals_are_returned_unchanged(self):
+        assert registrable_domain("localhost") == "localhost"
+        assert registrable_domain("192.168.1.1") == "192.168.1.1"
+
+    def test_brand_under_an_unknown_suffix_is_no_longer_skipped(self):
+        # The regression this fallback exists for: with the whole hostname as
+        # the registrable domain, "paypal" was the main label, so the check
+        # treated it as the real PayPal and returned nothing at all.
+        checks = [f["check"] for f in check_typosquatting("paypal.com.evil.example")]
+        assert "combosquatting" in checks

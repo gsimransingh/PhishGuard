@@ -54,7 +54,9 @@ def test_backslash_url_is_analyzed_as_browser_host():
     assert analyze_url("http://evil.example\\@paypal.com/login")["hostname"] == "evil.example"
 
 
-@gap
+# FIXED (brand-owned domain allowlist, length-scaled edit distance,
+# word-boundary combosquat matching). Marker removed with the fix; the
+# assertion stays as the regression test that keeps this gap shut.
 @pytest.mark.parametrize("hostname", [
     "login.microsoftonline.com",
     "outlook.office365.com",
@@ -74,7 +76,9 @@ def test_legitimate_domains_are_not_brand_squats(hostname):
 
 # --- P2: detection gaps -----------------------------------------------------
 
-@gap
+# FIXED (the From header now runs through the brand engine under its own
+# check ids). Marker removed with the fix; see tests/test_analyzer.py for the
+# findings this produces.
 def test_lookalike_sender_domain_is_flagged(tmp_path):
     raw = HEADERS.format(sender='"PayPal Security" <service@paypa1.com>', extra="") + (
         "Content-Type: text/plain\n\nYour account is locked. Reply with your password.\n"

@@ -26,6 +26,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from phishguard.analyzer import _extract_domain, _extract_email_address, analyze
 from phishguard.email_parser import parse_eml
 from phishguard import __version__
@@ -161,7 +163,11 @@ class TestAnalyzeSampleEmails:
         )
         assert mismatch["confidence"] == "high"
         assert mismatch["evidence"]["displayed_domain"] == "paypal.com"
-        assert mismatch["evidence"]["destination_domain"] == "paypal-login.evil.example"
+        # ".example" is not in the bundled public-suffix snapshot, so the
+        # destination reduces to the last two labels rather than the whole
+        # hostname. Comparing registrable domains is the point of the check:
+        # paypal.com vs evil.example is still a mismatch.
+        assert mismatch["evidence"]["destination_domain"] == "evil.example"
         assert report["risk_level"] in ("MEDIUM", "HIGH", "CRITICAL")
 
     def test_executable_mime_disguised_as_pdf_is_flagged(self, suspicious_attachment_eml):
@@ -657,3 +663,123 @@ class TestCliEndToEnd:
         assert f"v{__version__}" not in result.stdout
         assert f"v{__version__}" not in result.stderr  # banner skipped entirely for json mode
         assert "\033[" not in result.stdout
+
+
+class TestSenderDomainBrandImpersonation:
+    """The From header runs through the brand engine under its own check ids.
+
+    Before this, the brand checks only ever saw URLs in the body, so a message
+    from a lookalike domain with no links at all scored nothing.
+    """
+
+    def test_lookalike_sender_domain_is_flagged(self):
+        parsed = _minimal_parsed(**{"from": '"PayPal Security" <service@paypa1.com>'})
+        report = analyze(parsed, "test.eml", run_intel=False)
+
+        finding = next(
+            f for f in report["findings"] if f["check"] == "sender_domain_typosquatting"
+        )
+        assert finding["evidence"]["sender_domain"] == "paypa1.com"
+        assert finding["confidence"] == "high"
+        assert finding["score_contribution"] == 40
+        assert finding["false_positive_note"]
+        assert finding["recommended_action"]
+        assert report["risk_score"] > 0
+
+    def test_combosquat_sender_domain_is_flagged(self):
+        parsed = _minimal_parsed(**{"from": "billing@paypal-account-verify.example"})
+        report = analyze(parsed, "test.eml", run_intel=False)
+
+        checks = {f["check"] for f in report["findings"]}
+        assert "sender_domain_combosquatting" in checks
+
+    def test_sender_findings_do_not_reuse_the_url_check_ids(self):
+        # An analyst has to be able to tell a lookalike SENDER from a
+        # lookalike LINK; reusing "typosquatting" for both would hide which
+        # part of the message was impersonating the brand.
+        parsed = _minimal_parsed(**{"from": "service@paypa1.com"})
+        checks = {f["check"] for f in analyze(parsed, "test.eml", run_intel=False)["findings"]}
+
+        assert "sender_domain_typosquatting" in checks
+        assert "typosquatting" not in checks
+
+    def test_sender_and_url_lookalikes_are_reported_separately(self):
+        parsed = _minimal_parsed(**{
+            "from": "service@paypa1.com",
+            "urls": ["https://paypal-login.evil.example/verify"],
+        })
+        checks = {f["check"] for f in analyze(parsed, "test.eml", run_intel=False)["findings"]}
+
+        assert {"sender_domain_typosquatting", "combosquatting"} <= checks
+
+    @pytest.mark.parametrize("from_header", [
+        '"Microsoft 365 Message center" <o365mc@microsoft.com>',
+        '"Amazon.com" <ship-confirm@amazon.com>',
+        '"Google" <no-reply@accounts.google.com>',
+        '"Outlook" <no-reply@outlook.office365.com>',
+        '"GitHub" <noreply@github.com>',
+    ])
+    def test_real_brand_senders_are_not_flagged(self, from_header):
+        report = analyze(_minimal_parsed(**{"from": from_header}), "test.eml", run_intel=False)
+
+        checks = {f["check"] for f in report["findings"]}
+        assert not checks & {
+            "sender_domain_typosquatting",
+            "sender_domain_combosquatting",
+            "display_name_brand_spoof",
+        }
+        assert report["risk_score"] == 0
+
+    def test_ambiguous_from_header_is_skipped_not_guessed(self):
+        # _extract_domain returns "" for a header with several addresses, and
+        # the brand checks must not run against a guess.
+        parsed = _minimal_parsed(**{"from": "a@paypa1.com, b@evil.example"})
+        checks = {f["check"] for f in analyze(parsed, "test.eml", run_intel=False)["findings"]}
+
+        assert not checks & {
+            "sender_domain_typosquatting",
+            "sender_domain_combosquatting",
+            "display_name_brand_spoof",
+        }
+
+
+class TestDisplayNameBrandSpoof:
+    """A brand in the display name that the sending domain does not own."""
+
+    def test_brand_display_name_on_an_unrelated_domain_is_flagged(self):
+        parsed = _minimal_parsed(**{"from": '"PayPal Security" <attacker@evil.example>'})
+        report = analyze(parsed, "test.eml", run_intel=False)
+
+        finding = next(
+            f for f in report["findings"] if f["check"] == "display_name_brand_spoof"
+        )
+        assert finding["evidence"]["brand"] == "paypal"
+        assert finding["evidence"]["sender_domain"] == "evil.example"
+        assert finding["score_contribution"] == 30
+        assert finding["false_positive_note"]
+        assert finding["recommended_action"]
+
+    def test_one_finding_per_message_even_with_two_brands_named(self):
+        parsed = _minimal_parsed(**{"from": '"Microsoft Outlook" <no-reply@evil.example>'})
+        report = analyze(parsed, "test.eml", run_intel=False)
+
+        spoofs = [f for f in report["findings"] if f["check"] == "display_name_brand_spoof"]
+        assert len(spoofs) == 1
+
+    def test_display_name_without_a_brand_is_not_flagged(self):
+        parsed = _minimal_parsed(**{"from": '"Finance Team" <billing@example.com>'})
+        checks = {f["check"] for f in analyze(parsed, "test.eml", run_intel=False)["findings"]}
+
+        assert "display_name_brand_spoof" not in checks
+
+    def test_brand_named_inside_a_longer_word_is_not_flagged(self):
+        parsed = _minimal_parsed(**{"from": '"Pineapple Growers" <news@example.com>'})
+        checks = {f["check"] for f in analyze(parsed, "test.eml", run_intel=False)["findings"]}
+
+        assert "display_name_brand_spoof" not in checks
+
+    def test_brand_subdomain_of_an_owned_domain_is_not_flagged(self):
+        parsed = _minimal_parsed(**{"from": '"Apple" <no_reply@email.apple.com>'})
+        checks = {f["check"] for f in analyze(parsed, "test.eml", run_intel=False)["findings"]}
+
+        assert "display_name_brand_spoof" not in checks

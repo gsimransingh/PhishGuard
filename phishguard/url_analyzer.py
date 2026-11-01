@@ -55,6 +55,7 @@ import re
 import socket
 import ssl
 from datetime import datetime, timezone
+from functools import lru_cache
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -116,17 +117,72 @@ def _parse_url_input(url: str):
     return normalized, parsed, hostname, port
 
 
-def _load_known_brands() -> list:
-    """Load the brand list from data/known_brands.json, with a small built-in
-    fallback so the tool still functions if the config file is missing or
-    corrupted (fail-safe, not fail-silent — this is worth noticing in a review
-    but shouldn't crash a scan)."""
+# Fallback used only when data/known_brands.json is missing or corrupted.
+# Deliberately small: a brand with no owned domains still gets checked, it just
+# cannot be allowlisted, so the failure mode is extra noise, never a bypass.
+_FALLBACK_BRANDS = {
+    "paypal": frozenset({"paypal.com"}),
+    "amazon": frozenset({"amazon.com", "amazonaws.com"}),
+    "microsoft": frozenset({"microsoft.com", "microsoftonline.com"}),
+    "google": frozenset({"google.com", "googleapis.com"}),
+    "apple": frozenset({"apple.com", "icloud.com"}),
+    "netflix": frozenset({"netflix.com"}),
+}
+
+
+@lru_cache(maxsize=1)
+def _load_known_brands() -> dict:
+    """Load brand -> owned registrable domains from data/known_brands.json.
+
+    Cached: the brand data is read once per URL checked, and a single message
+    can carry 200 of them, with batch mode multiplying that by 100 files.
+    Call ``_load_known_brands.cache_clear()`` if the file changes in-process.
+
+    The file groups brands by owner, so every name in one entry shares that
+    owner's domains: "outlook" is not impersonated by office365.com, because
+    Microsoft owns both. Returns a flat {brand: frozenset(domains)} mapping.
+
+    Falls back to a small built-in map if the config file is missing or
+    corrupted (fail-safe, not fail-silent — worth noticing in a review but it
+    shouldn't crash a scan).
+    """
     try:
         with open(_BRANDS_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return [b.lower() for b in data.get("brands", [])]
-    except (FileNotFoundError, json.JSONDecodeError):
-        return ["paypal", "amazon", "microsoft", "google", "apple", "netflix"]
+        brands: dict = {}
+        for group in data.get("brands", []):
+            domains = frozenset(str(d).lower() for d in group.get("domains", []))
+            for name in group.get("names", []):
+                brands[str(name).lower()] = domains
+        return brands or dict(_FALLBACK_BRANDS)
+    except (FileNotFoundError, json.JSONDecodeError, AttributeError, TypeError):
+        return dict(_FALLBACK_BRANDS)
+
+
+def _normalize_brands(brands) -> dict:
+    """Accept either a {brand: owned domains} mapping or a bare brand list.
+
+    The bare-list form keeps call sites and tests that only care about the
+    matching rules short; those brands simply have no owned domains, so no
+    hostname is allowlisted for them.
+    """
+    if isinstance(brands, dict):
+        return {
+            str(brand).lower(): frozenset(str(d).lower() for d in domains)
+            for brand, domains in brands.items()
+        }
+    return {str(brand).lower(): frozenset() for brand in brands}
+
+
+def brand_owned_domains() -> dict:
+    """Return {brand: frozenset(registrable domains that brand's owner owns)}.
+
+    The public read-only view of known_brands.json, so the email analyzer can
+    ask the same question about a From header that this module asks about a
+    hostname, without either side keeping its own copy of the brand data.
+    A copy, so a caller cannot mutate the cached brand data.
+    """
+    return dict(_load_known_brands())
 
 
 def _levenshtein(a: str, b: str) -> int:
@@ -153,14 +209,6 @@ def _levenshtein(a: str, b: str) -> int:
     return prev[-1]
 
 
-def registrable_domain(hostname: str) -> str:
-    """Return the registrable domain using the bundled public suffix snapshot."""
-    extracted = _PUBLIC_SUFFIX_EXTRACT(hostname)
-    if extracted.domain and extracted.suffix:
-        return f"{extracted.domain}.{extracted.suffix}"
-    return hostname
-
-
 def _is_ip_literal(hostname: str) -> bool:
     """Return whether a hostname is a literal IPv4 or IPv6 address."""
     try:
@@ -168,6 +216,32 @@ def _is_ip_literal(hostname: str) -> bool:
         return True
     except ValueError:
         return False
+
+
+def registrable_domain(hostname: str) -> str:
+    """Return the registrable domain using the bundled public suffix snapshot.
+
+    When the snapshot does not recognise the suffix — it is a point-in-time
+    copy, so any TLD delegated after it was cut lands here — fall back to the
+    last two labels instead of returning the whole hostname. Returning the
+    whole hostname fails open in the attacker's favour: callers take the
+    leftmost label as the registrable one, so "paypal.com.evil.<new-tld>"
+    reads as the real PayPal and skips the brand checks entirely. The last
+    two labels are the conservative guess, because they are the closest thing
+    to a label somebody had to register.
+    """
+    extracted = _PUBLIC_SUFFIX_EXTRACT(hostname)
+    if extracted.domain and extracted.suffix:
+        return f"{extracted.domain}.{extracted.suffix}"
+
+    lowered = hostname.lower().strip(".")
+    if _is_ip_literal(lowered):
+        return lowered  # "1.1" is not the registrable domain of 192.168.1.1
+
+    labels = [label for label in lowered.split(".") if label]
+    if len(labels) >= 2:
+        return ".".join(labels[-2:])
+    return hostname
 
 
 def _is_allowed_ip_literal(hostname: str) -> bool:
@@ -303,60 +377,134 @@ def check_punycode_homograph(hostname: str) -> list:
 # Check 3: Typosquatting / combosquatting
 # ---------------------------------------------------------------------------
 
-def check_typosquatting(hostname: str, brands: Optional[list] = None) -> list:
+# A brand has to be at least this long before a match at the END of a longer
+# label counts. "securepaypal" (6-char brand) is a combosquat; treating the
+# tail of "purchase" as "chase" or of "pineapple" as "apple" is not.
+_MIN_BRAND_LENGTH_FOR_SUFFIX_MATCH = 6
+
+# Below this, edit distance says nothing: "abc" is 2 edits from "hsbc" and
+# "ups" is 1 from "usps" purely because the words are short.
+_MIN_LENGTH_FOR_EDIT_DISTANCE = 4
+# Two edits only buy a match on a long brand, where "rnicrosoft" for
+# "microsoft" needs them and ordinary words are not that close by accident.
+_LENGTH_FOR_TWO_EDITS = 8
+
+
+def _allowed_edit_distance(brand: str, label: str) -> int:
+    """How many edits may separate a label from a brand before it is a squat.
+
+    Scaled to the shorter of the two strings, because edit distance is only
+    meaningful relative to length: 2 edits on a 4-character word is most of
+    the word, while 2 edits on "microsoft" is a deliberate lookalike. Returns
+    0 when the pair is too short for the check to mean anything.
+    """
+    shorter = min(len(brand), len(label))
+    if shorter < _MIN_LENGTH_FOR_EDIT_DISTANCE:
+        return 0
+    return 1 if shorter < _LENGTH_FOR_TWO_EDITS else 2
+
+
+def _label_carries_brand(label: str, brand: str) -> bool:
+    """Whether one hostname label carries the brand at a word boundary.
+
+    The brand must BE the label, start it ("paypal-secure", "paypalsecure"),
+    or — only for brands long enough that an accidental word ending is
+    implausible — end it ("securepaypal"). A brand buried inside a longer
+    word is not a match; a naked substring test is what made "purchase" look
+    like "chase" and "pineapple" look like "apple".
+    """
+    if label.startswith(brand):
+        return True
+    return len(brand) >= _MIN_BRAND_LENGTH_FOR_SUFFIX_MATCH and label.endswith(brand)
+
+
+def _brand_comparison_labels(hostname: str, registrable: str) -> set:
+    """Split a hostname into the word labels a brand is compared against.
+
+    Splits on dots and on the separators attackers glue brand names together
+    with ("secure-paypal-login" -> secure, paypal, login), and drops the
+    public suffix so a brand-operated TLD such as ".apple" is not read as an
+    impersonation of its own brand.
+    """
+    lowered = hostname.lower().strip(".")
+    suffix = registrable.partition(".")[2]
+    if suffix and lowered.endswith(f".{suffix}"):
+        lowered = lowered[: -len(suffix) - 1]
+    return {label for label in re.split(r"[^a-z0-9]+", lowered) if label}
+
+def check_typosquatting(hostname: str, brands: Optional[list | dict] = None) -> list:
     """
     Two related checks against a configurable brand list
     (phishguard/data/known_brands.json):
 
-    1. Typosquat   - registrable domain is within edit-distance 1-2 of a
-                     known brand but isn't the real thing (paypa1.com).
-    2. Combosquat  - the brand name appears somewhere in the hostname, but
-                     the registrable domain isn't the brand's real domain
+    1. Typosquat   - registrable domain is within a length-scaled edit
+                     distance of a known brand but isn't the real thing
+                     (paypa1.com, rnicrosoft.com).
+    2. Combosquat  - the brand name appears as a word inside the hostname,
+                     but the registrable domain isn't one the brand owns
                      (paypal-secure-login.net, paypal.verify-account.ru).
 
+    Both checks are skipped for a brand when the hostname's registrable
+    domain is one that brand's owner operates. That mapping is the reason
+    login.microsoftonline.com, s3.amazonaws.com, fonts.googleapis.com and
+    steamcommunity.com are not reported: each legitimately begins with its
+    own brand name. Suppression is per owner, not global, so a brand-operated
+    hosting domain still catches another brand's name —
+    paypal-login.s3.amazonaws.com is reported as a PayPal combosquat.
+
     False positives: legitimate resellers, fan sites, or review sites can
-    reference brand names in subdomains (paypal.reviews.example.com).
+    reference brand names in subdomains (paypal.reviews.example.com). A brand
+    domain missing from known_brands.json also reads as impersonation of
+    itself, which is the usual cause of a surprising hit here.
 
     False negatives: only catches brands present in known_brands.json —
     anything not on that list is invisible to this check. This is a curated
-    list, not an exhaustive one, and needs upkeep as new targeted brands emerge.
+    list, not an exhaustive one, and needs upkeep as new targeted brands
+    emerge. A brand sitting in the middle of a longer word is not matched by
+    design, and neither is a lookalike that both substitutes a character and
+    adds words to the same label ("paypa1-secure-login.ru").
     """
-    if brands is None:
-        brands = _load_known_brands()
+    brand_domains = _normalize_brands(
+        _load_known_brands() if brands is None else brands
+    )
 
     findings = []
-    registrable = registrable_domain(hostname)
-    main_label = registrable.split(".")[0].lower() if registrable else ""
+    registrable = registrable_domain(hostname).lower()
+    main_label = registrable.split(".")[0] if registrable else ""
+    comparison_labels = _brand_comparison_labels(hostname, registrable)
 
-    for brand in brands:
+    for brand, owned_domains in brand_domains.items():
         if not main_label or main_label == brand:
             continue  # empty, or it IS the real brand domain — nothing to flag
 
+        if registrable in owned_domains:
+            continue  # a domain this brand's owner operates
+
         if len(brand) <= 3:
-            # Short brand names (e.g. "att", "ups") are too generic for a
-            # substring/edit-distance check — they'd match inside ordinary
-            # words ("attack", "upstairs") and flood the report with noise.
-            # This guard applies to both typosquat and combosquat checks below.
+            # Short brand names (e.g. "att", "ups") are too generic even for
+            # word-boundary matching — they'd match short ordinary labels and
+            # flood the report with noise. Applies to both checks below.
             continue
 
+        allowed_distance = _allowed_edit_distance(brand, main_label)
         distance = _levenshtein(main_label, brand)
-        if 0 < distance <= 2:
+        if allowed_distance and 0 < distance <= allowed_distance:
             findings.append({
                 "check": "typosquatting",
                 "finding": f"Domain label '{main_label}' is very close to known brand '{brand}' (edit distance {distance})",
                 "weight": 35,
                 "confidence": "high" if distance == 1 else "medium",
-                "false_positive_note": "Short brand names risk false matches; distance > 2 is intentionally excluded to limit noise.",
+                "false_positive_note": "The tolerated edit distance scales with label length, so a short label that merely resembles a brand is not reported; a legitimate brand domain missing from known_brands.json can still produce a hit here.",
             })
             break  # one typosquat match is enough signal, avoid stacking noise
 
-        if brand in hostname.lower() and main_label != brand and not registrable.lower().startswith(f"{brand}."):
+        if any(_label_carries_brand(label, brand) for label in comparison_labels):
             findings.append({
                 "check": "combosquatting",
-                "finding": f"Brand name '{brand}' appears in hostname '{hostname}' but is not the registrable domain",
+                "finding": f"Brand name '{brand}' appears in hostname '{hostname}' but is not a domain that brand owns",
                 "weight": 30,
                 "confidence": "medium",
-                "false_positive_note": "Legitimate brand-related subdomains on third-party sites can trigger this.",
+                "false_positive_note": "Legitimate brand-related subdomains on third-party sites can trigger this, as can a brand-owned domain that is missing from known_brands.json.",
             })
             break
 

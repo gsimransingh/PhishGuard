@@ -20,19 +20,19 @@ For each reported email it answers four questions:
 
 PhishGuard is **pre-1.0**. Detection quality is measured on an offline corpus and the numbers are published here, including the bad ones.
 
-**Corpus:** 45 labelled emails (23 phishing, 22 benign): 7 hand-written fixtures plus 38 deterministic synthetic `.eml` files. **No real-world captures yet.** These numbers say how the rules behave on known patterns, not how the tool performs in production.
+**Corpus:** 51 labelled emails (26 phishing, 25 benign): 7 hand-written fixtures plus 44 deterministic synthetic `.eml` files. **No real-world captures yet.** These numbers say how the rules behave on known patterns, not how the tool performs in production.
 
 | Run mode | Accuracy | Phishing recall | False-positive rate |
 | --- | --- | --- | --- |
-| Default CLI (`--auth-source unknown_capture`) | 100% | **100%** (23/23) | 0% |
+| Default CLI (`--auth-source unknown_capture`) | 100% | **100%** (26/26) | 0% |
 
-**Read that 100% as "this corpus has stopped discriminating", not as "detection is finished".** Fourteen confirmed gaps are still open below, and the corpus contains no case for any of them — a sender-domain lookalike with no links, a credential-harvesting `<form>` with no `<a href>`, and the brand false positives are all unmeasured here. The number is a regression floor, not an accuracy claim.
+**Read that 100% as "this corpus has stopped discriminating", not as "detection is finished".** Ten confirmed gaps are still open below, and the corpus has a case for almost none of them: a credential-harvesting `<form>` with no `<a href>`, a backslash URL, and a display name hiding a Reply-To mismatch are all unmeasured here. A sender-domain lookalike with no links and legitimate brand mail — both unmeasured when this was written — now have cases. The number is a regression floor, not an accuracy claim.
 
 This is a different figure from the 100% this README previously withdrew. That one came from scoring each case under its own `auth_source` label, so the label leaked the answer. This one scores every case in uniform default CLI mode, and the benign half now contains mail that genuinely fails authentication. The methodology is sound; the corpus is simply too easy. Making it harder is milestone 0.9.
 
-**Why recall moved from 48% to 95%:** earlier versions discarded SPF/DKIM/DMARC results entirely unless the analyst declared the header's provenance, so a message that failed all three came back `likely_benign` with no flags. The threat model is asymmetric, though: an attacker who forges an `Authentication-Results` header writes `pass` to slip past a filter — forging `dmarc=fail` against yourself achieves nothing. So a recorded **failure** is now scored whatever its provenance, while a recorded **pass** still counts for nothing unless you pass `--auth-source trusted_gateway`. Absent results (`missing`, `none`, `neutral`) are not scored either, since stripping a header is free.
+**Why recall moved from 48% to 100%:** earlier versions discarded SPF/DKIM/DMARC results entirely unless the analyst declared the header's provenance, so a message that failed all three came back `likely_benign` with no flags. The threat model is asymmetric, though: an attacker who forges an `Authentication-Results` header writes `pass` to slip past a filter — forging `dmarc=fail` against yourself achieves nothing. So a recorded **failure** is now scored whatever its provenance, while a recorded **pass** still counts for nothing unless you pass `--auth-source trusted_gateway`. Absent results (`missing`, `none`, `neutral`) are not scored either, since stripping a header is free. Scoring failures accounts for most of that movement; pointing the brand checks at the `From` header closed the rest, since a lookalike sender domain is attacker-controlled and authenticates perfectly.
 
-**What that costs:** legitimate mail does fail authentication. Forwarding breaks SPF, and a mailing list that appends a footer invalidates DKIM and takes DMARC with it. When a message carries list (RFC 2919/2369) or `Resent-*` headers, authentication failures are scored at half weight with `low` confidence and a caveat naming the relay evidence — the finding stays visible, but ordinary list traffic does not escalate. The benign half of the corpus now includes forwarded and mailing-list messages that genuinely fail authentication, so that 0% false-positive rate is measured rather than assumed.
+**What that costs:** legitimate mail does fail authentication. Forwarding breaks SPF, and a mailing list that appends a footer invalidates DKIM and takes DMARC with it. When a message carries list (RFC 2919/2369) or `Resent-*` headers, authentication failures are scored at half weight with `low` confidence and a caveat naming the relay evidence — the finding stays visible, but ordinary list traffic does not escalate. The benign half of the corpus now includes forwarded and mailing-list messages that genuinely fail authentication, plus ordinary Microsoft 365, Amazon, and Google notifications that name their own brand and link to their own domains, so that 0% false-positive rate is measured rather than assumed.
 
 Earlier versions of this README reported 100% accuracy. That figure came from an evaluation in which every phishing case ran in trusted-gateway mode and every benign case did not, so the label leaked into the result. It has been withdrawn.
 
@@ -41,7 +41,7 @@ Earlier versions of this README reported 100% accuracy. That figure came from an
 | Area | Checks | Scored by default |
 | --- | --- | --- |
 | Authentication | SPF, DKIM, DMARC results from `Authentication-Results` / `Received-SPF`; DKIM signature presence | Recorded **failures** always; `pass` and `missing` only with `--auth-source trusted_gateway` |
-| Sender | Reply-To vs From mismatch | Yes |
+| Sender | Reply-To vs From mismatch; typosquat and combosquat of the `From` domain; brand named in the display name that the sending domain does not own | Yes |
 | Links | HTML link text vs real destination; IP hosts, `@` tricks, deep subdomains, abused TLDs, non-standard ports, punycode; typosquat and combosquat against a curated brand list | Yes |
 | Attachments | Risky and active-content extensions, double extensions, bidirectional-text filenames, executable MIME type vs filename, **file signature vs extension**; SHA-256 per attachment; found regardless of `Content-Disposition` | Yes |
 | Enrichment (opt-in) | AbuseIPDB (IPs), VirusTotal (URLs), SPF/DMARC DNS, RDAP domain age, TLS certificate | Only with `--enrich` |
@@ -52,16 +52,16 @@ Extracted indicators include each attachment's SHA-256 and detected file format,
 
 These are confirmed misses or false positives, tracked on the roadmap below. Analysts should check for them manually until they are fixed.
 
-- **The sender domain itself is not checked for lookalikes.** `"PayPal Security" <service@paypa1.com>` with no links scores 0 — even though the same domain scores 35 through `-u`. The brand engine is simply not pointed at the `From` header.
 - **HTML forms, iframes, and meta refresh are not extracted.** Only `<a href>` links are.
-- **The brand check flags some legitimate domains.** Examples include `login.microsoftonline.com`, `outlook.office365.com`, `s3.amazonaws.com`, and `purchase.com` (contains "chase"). Short brands also match ordinary words (`abc.com` → hsbc, `ups.com` → usps).
 - **A display name can hide a Reply-To mismatch.** For example: `"a@x.com <a@x.com>" <evil@y.com>`.
 - **URLs containing a backslash are analyzed as the wrong host.** For `http://evil.example\@paypal.com`, browsers go to `evil.example`, but PhishGuard analyzes `paypal.com`.
 - **One VirusTotal engine is enough to raise a high-confidence malicious finding.**
 - **The HTML report omits the authentication interpretation.** It prints the raw SPF/DKIM/DMARC header values but not `score_status` or `scored_because`, so it does not show which results were scored and which were ignored. It also omits `url_analysis`, `dns_validation`, and the received chain, making it a less complete view than the JSON report.
 - **IPv6 and obfuscated IP hosts are not flagged as raw-IP destinations.** `ip_as_hostname` matches dotted-quad IPv4 only, so `http://[2001:db8::1]/`, `http://1021342134/` (decimal) and `http://0x7f.1/` (hex) score 0.
-- **An unknown public suffix defeats the brand checks.** When `tldextract`'s bundled snapshot does not recognise a suffix, the whole hostname is treated as the registrable domain, so `paypal.com.evil.<unknown-tld>` reads its leftmost label as the real brand and is skipped.
 - **A valid header-only `.eml` is rejected.** Parsing requires a blank line within the 64 KiB header limit, so a message with no body — a common SOC capture — fails with a misleading size error, as do empty and non-email files.
+- **A brand-owned domain missing from `known_brands.json` reads as impersonation of itself.** The owned-domain lists are curated, not exhaustive; a legitimate domain that is not listed can produce a brand finding, and adding it is a data change, not a code change.
+- **A lookalike that both substitutes a character and adds words to one label is missed.** `paypa1-secure-login.ru` defeats the edit-distance check (the whole label is too far from the brand) and the combosquat check (the brand spelling is not present).
+- **Brand-named mail from a brand's own hosting domain is not checked against that brand.** A page for Amazon hosted on `s3.amazonaws.com` is not reported as an Amazon squat, because that domain is Amazon's. Another brand on the same host still is.
 
 ### Design limitations
 
@@ -70,7 +70,7 @@ These are confirmed misses or false positives, tracked on the roadmap below. Ana
 - A recorded authentication **failure** is scored whatever its provenance; a recorded **pass** is scored only when the analyst declares the header trustworthy, because forging a `pass` is exactly what an attacker would do. A `missing` result is never scored — stripping a header costs nothing.
 - Relay-aware softening keys off list and `Resent-*` headers, which an attacker can also add. It reduces the weight of an authentication failure; it never suppresses the finding, and every other check still applies at full weight.
 - DNS records show what a domain publishes, not what happened at delivery.
-- Domain extraction uses a bundled public-suffix snapshot; update the dependency periodically.
+- Domain extraction uses a bundled public-suffix snapshot; update the dependency periodically. When the snapshot does not recognise a suffix, the registrable domain falls back to the last two labels, so an unknown TLD cannot make `paypal.com.evil.<new-tld>` read as the real PayPal.
 - Enrichment coverage depends on API keys, availability, and rate limits.
 - Repeated hits of one rule stay visible as evidence but score only once.
 
@@ -261,10 +261,10 @@ Weights and thresholds remain uncalibrated against each other — the heaviest d
 
 ### 0.8: Analyst trust
 
-- [ ] Brand-owned domain allowlist (`known_brands.json` needs a `domains` field), stricter edit distance scaled to label length, whole-token combosquat matching
+- [x] Brand-owned domain allowlist (`known_brands.json` needs a `domains` field), stricter edit distance scaled to label length, whole-token combosquat matching
 - [ ] Recalibrate weights against thresholds so a direct signal can reach `malicious_escalate` on its own evidence
 - [ ] Address-parser-based Reply-To comparison; WHATWG-style backslash handling in URLs
-- [ ] Sender-domain lookalike and display-name brand-spoof checks
+- [x] Sender-domain lookalike and display-name brand-spoof checks
 - [ ] Extract `form[action]`, `iframe`, `meta refresh`, `data:` / `javascript:` URLs; flag password inputs
 - [ ] VirusTotal finding requires a minimum engine count
 

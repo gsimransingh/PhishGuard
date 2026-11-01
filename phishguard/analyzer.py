@@ -16,7 +16,12 @@ from urllib.parse import urlparse
 from phishguard.email_parser import EXECUTABLE_SIGNATURES, EXPECTED_SIGNATURES
 from phishguard.threat_intel import check_ips, check_urls
 from phishguard.dns_validator import validate_spf_dns, validate_dmarc_dns
-from phishguard.url_analyzer import analyze_url, registrable_domain
+from phishguard.url_analyzer import (
+    analyze_url,
+    brand_owned_domains,
+    check_typosquatting,
+    registrable_domain,
+)
 from phishguard.triage import disposition_for_findings
 from phishguard import __version__
 from phishguard.security import MAX_IP_ENRICHMENTS, MAX_URL_ENRICHMENTS
@@ -173,6 +178,41 @@ def analyze(
             "Verify the Reply-To domain and intended reply workflow through a trusted channel.",
         )
 
+    # --- Sender identity: lookalike From domain and brand-spoofed display name
+    # The URL engine's brand checks were only ever pointed at links in the
+    # body, so a message from a lookalike domain with no links at all scored
+    # nothing. The From header is the identity the recipient is asked to
+    # trust, so it gets its own check ids: an analyst reading the report has
+    # to be able to tell a lookalike SENDER from a lookalike LINK.
+    sender_domain = _extract_domain(sender)
+    if sender_domain:
+        for brand_finding in check_typosquatting(sender_domain):
+            add_finding(
+                _SENDER_BRAND_CHECK_IDS[brand_finding["check"]],
+                f"Sender domain {sender_domain}: {brand_finding['finding']}",
+                _SENDER_BRAND_WEIGHTS[brand_finding["check"]],
+                brand_finding["confidence"],
+                {"sender_domain": sender_domain, "from": sender},
+                brand_finding["false_positive_note"],
+                "Confirm the sending domain against the brand's published domains "
+                "through a trusted channel before acting on the message.",
+            )
+
+    for spoof in _display_name_brand_spoofs(sender, sender_domain):
+        add_finding(
+            "display_name_brand_spoof",
+            (
+                f"From display name claims brand '{spoof['brand']}' but the message "
+                f"was sent from {spoof['sender_domain']}, which that brand does not own"
+            ),
+            30, "medium", spoof,
+            "Resellers, MSPs, internal IT, and email service providers legitimately "
+            "send brand-named mail from their own domains; a brand domain missing "
+            "from known_brands.json produces this finding too.",
+            "Compare the display name with the sending domain and verify the "
+            "relationship through a trusted channel.",
+        )
+
     # --- Suspicious URLs ---
     urls: list[str] = parsed.get("urls", [])
     url_analysis: list[dict] = []
@@ -235,7 +275,6 @@ def analyze(
 
     # --- External DNS validation ---
     dns_results: dict[str, Optional[dict]] = {"spf": None, "dmarc": None}
-    sender_domain = _extract_domain(sender)
     if run_intel and sender_domain:
         dns_results["spf"] = validate_spf_dns(sender_domain)
         dns_results["dmarc"] = validate_dmarc_dns(sender_domain)
@@ -380,6 +419,22 @@ _DOMAIN_RE = re.compile(
     r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}$"
 )
 
+# Brand findings about the From header get their own ids so a report never
+# leaves an analyst guessing whether the lookalike was the sender or a link.
+_SENDER_BRAND_CHECK_IDS = {
+    "typosquatting": "sender_domain_typosquatting",
+    "combosquatting": "sender_domain_combosquatting",
+}
+# Weighted a little above the URL equivalents (35/30): a link can be a
+# tracking redirect, a quoted third-party URL, or something the sender never
+# chose, while the From domain is the identity the message asserts for itself
+# and is the one an attacker had to register.
+_SENDER_BRAND_WEIGHTS = {"typosquatting": 40, "combosquatting": 35}
+
+# Below 4 characters a brand name matches ordinary words in a display name
+# ("ups", "att") far too readily to be worth scoring.
+_MIN_DISPLAY_NAME_BRAND_LENGTH = 4
+
 
 def _extract_domain(from_header: str) -> str:
     """
@@ -396,6 +451,51 @@ def _extract_domain(from_header: str) -> str:
         return ""
     domain = addresses[0].rsplit("@", 1)[1].strip().lower().rstrip(".")
     return domain if _DOMAIN_RE.match(domain) else ""
+
+
+def _extract_display_name(from_header: str) -> str:
+    """Return the display name of the single sender address, or ""."""
+    addresses = getaddresses([from_header])
+    if len(addresses) != 1:
+        return ""
+    return addresses[0][0].strip()
+
+
+def _display_name_brand_spoofs(from_header: str, sender_domain: str) -> list[dict]:
+    """Find a brand named in the From display name that the sender does not own.
+
+    '"PayPal Security" <attacker@evil.example>' is brand impersonation even
+    though the domain is not a lookalike at all: mail clients show the display
+    name, the attacker picks it freely, and nothing in the address has to
+    match it. Needs a resolvable sender domain — with an ambiguous From header
+    there is nothing to compare against, so the check is skipped rather than
+    run against a guess.
+
+    Returns at most one spoof: "Microsoft Outlook" names two brands with the
+    same owner and is one piece of evidence, not two.
+    """
+    if not sender_domain:
+        return []
+    display_name = _extract_display_name(from_header)
+    if not display_name:
+        return []
+
+    tokens = {token for token in re.split(r"[^a-z0-9]+", display_name.lower()) if token}
+    registrable = registrable_domain(sender_domain).lower()
+    main_label = registrable.split(".")[0]
+
+    for brand, owned_domains in brand_owned_domains().items():
+        if len(brand) < _MIN_DISPLAY_NAME_BRAND_LENGTH or brand not in tokens:
+            continue
+        if main_label == brand or registrable in owned_domains:
+            continue  # the sender really is that brand
+        return [{
+            "brand": brand,
+            "display_name": display_name,
+            "sender_domain": sender_domain,
+            "sender_registrable_domain": registrable,
+        }]
+    return []
 
 
 def _build_triage_summary(

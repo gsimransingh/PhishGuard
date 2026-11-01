@@ -3,6 +3,12 @@
 These messages are synthetic test data. They are deliberately based on
 reserved/example domains and contain no personal or operational content.
 They must not be described as real SOC evidence.
+
+The brand_notification cases are the one exception to the reserved-domain
+rule: they use real brand-owned sending domains, because what they test is
+whether the brand-owned domain allowlist stops PhishGuard escalating ordinary
+Microsoft 365, Amazon, and Google mail. The message bodies are still invented
+and assert nothing about those companies.
 """
 
 import argparse
@@ -229,6 +235,89 @@ SYNTHETIC_DEFINITIONS.extend([
         "kind": "missing_auth",
         "subject": "Message without preserved auth results",
     },
+    # Brand impersonation of the SENDER, not of a link: nothing in these
+    # messages is suspicious except the From header itself.
+    {
+        "id": "synthetic_lookalike_sender_01",
+        "category": "credential_phishing",
+        "expected_disposition": "suspicious_escalate",
+        "auth_source": "unknown_capture",
+        "auth": "pass",
+        "kind": "lookalike_sender",
+        "subject": "Your account has been limited",
+        "from": '"PayPal Security" <service@paypa1.example>',
+    },
+    {
+        "id": "synthetic_lookalike_sender_02",
+        "category": "credential_phishing",
+        "expected_disposition": "suspicious_escalate",
+        "auth_source": "unknown_capture",
+        "auth": "pass",
+        "kind": "lookalike_sender",
+        "subject": "Unusual sign-in activity",
+        "from": '"Microsoft Account Team" <no-reply@microsoft-account-security.example>',
+    },
+    # A brand buried in the subdomains of a host under a TLD the bundled
+    # public-suffix snapshot does not know. Before the registrable-domain
+    # fallback was fixed, the leftmost label read as the real brand and this
+    # scored nothing at all.
+    {
+        "id": "synthetic_unknown_suffix_brand_url_01",
+        "category": "credential_phishing",
+        "expected_disposition": "suspicious_escalate",
+        "auth_source": "unknown_capture",
+        "auth": "pass",
+        "kind": "brand_subdomain_url",
+        "subject": "Confirm your account details",
+        "from": '"PayPal Service" <service@billing.example>',
+        "url": "https://paypal.com.verify-account.example/login",
+    },
+    # Ordinary brand mail that must stay out of the queue. These are the
+    # false positives the 0.8 brand work exists to prevent.
+    {
+        "id": "synthetic_brand_notification_01",
+        "category": "benign_brand_notification",
+        "expected_disposition": "likely_benign",
+        "auth_source": "unknown_capture",
+        "auth": "pass",
+        "kind": "brand_notification",
+        "subject": "Message center major change update",
+        "from": '"Microsoft 365 Message center" <o365mc@microsoft.com>',
+        "links": [
+            "https://admin.microsoft.com/adminportal/home",
+            "https://login.microsoftonline.com/common/oauth2/authorize",
+        ],
+    },
+    {
+        "id": "synthetic_brand_notification_02",
+        "category": "benign_brand_notification",
+        "expected_disposition": "likely_benign",
+        "auth_source": "unknown_capture",
+        "auth": "pass",
+        "kind": "brand_notification",
+        "subject": "Your order has shipped",
+        "from": '"Amazon.com" <ship-confirm@amazon.com>',
+        "links": [
+            "https://www.amazon.com/gp/css/order-history",
+            "https://m.media-amazon.com/images/G/01/logo.png",
+            "https://s3.amazonaws.com/receipts/order.pdf",
+        ],
+    },
+    {
+        "id": "synthetic_brand_notification_03",
+        "category": "benign_brand_notification",
+        "expected_disposition": "likely_benign",
+        "auth_source": "unknown_capture",
+        "auth": "pass",
+        "kind": "brand_notification",
+        "subject": "Security alert for your linked account",
+        "from": '"Google" <no-reply@accounts.google.com>',
+        "links": [
+            "https://myaccount.google.com/notifications",
+            "https://fonts.googleapis.com/css?family=Roboto",
+            "https://ssl.gstatic.com/accounts/logo.png",
+        ],
+    },
     {
         "id": "synthetic_safe_attachment_01",
         "category": "benign_attachment",
@@ -271,6 +360,9 @@ def _common_message(case: dict) -> EmailMessage:
         message["List-Unsubscribe"] = "<https://example.com/lists/dev/unsubscribe>"
         message["List-Post"] = "<mailto:dev-list@example.com>"
         message.replace_header("From", "Contributor <contributor@example.org>")
+
+    if case.get("from"):
+        message.replace_header("From", case["from"])
 
     if case["kind"] == "reply_mismatch":
         message.replace_header("From", "Finance <billing@example.com>")
@@ -329,6 +421,15 @@ def build_message(case: dict) -> EmailMessage:
             subtype="pdf",
             filename=case["filename"],
         )
+    elif kind == "lookalike_sender":
+        message.set_content(
+            "Your account has been limited. Confirm your details to restore access."
+        )
+    elif kind == "brand_subdomain_url":
+        message.set_content(f"Confirm your account details here: {case['url']}")
+    elif kind == "brand_notification":
+        lines = ["This is an account notification.", ""] + list(case["links"])
+        message.set_content("\n".join(lines) + "\n")
     elif kind == "auth_failure":
         message.set_content("This is a synthetic authentication-anomaly message.")
     elif kind == "reply_mismatch":
