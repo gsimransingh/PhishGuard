@@ -1,0 +1,15 @@
+From: "PayPal Service" <service@billing.example>
+To: analyst@example.test
+Date: Mon, 10 Aug 2026 09:00:00 +0000
+Message-ID: <synthetic_unknown_suffix_brand_url_01@example.com>
+Subject: Confirm your account details
+Received: from mx.example.com (203.0.113.10) by mx.example.test
+Received-SPF: pass
+DKIM-Signature: v=1; d=example.com; s=synthetic;
+Authentication-Results: mx.example.com; spf=pass; dkim=pass; dmarc=pass
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+Confirm your account details here: https://paypal.com.verify-account.example/=
+login

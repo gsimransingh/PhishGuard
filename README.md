@@ -20,11 +20,11 @@ For each reported email it answers four questions:
 
 PhishGuard is **pre-1.0**. Detection quality is measured on an offline corpus and the numbers are published here, including the bad ones.
 
-**Corpus:** 41 labelled emails (21 phishing, 20 benign): 7 hand-written fixtures plus 34 deterministic synthetic `.eml` files. **No real-world captures yet.** These numbers say how the rules behave on known patterns, not how the tool performs in production.
+**Corpus:** 47 labelled emails (24 phishing, 23 benign): 7 hand-written fixtures plus 40 deterministic synthetic `.eml` files. **No real-world captures yet.** These numbers say how the rules behave on known patterns, not how the tool performs in production.
 
 | Run mode | Accuracy | Phishing recall | False-positive rate |
 | --- | --- | --- | --- |
-| Default CLI (`--auth-source unknown_capture`) | 56% | **48%** | 0% |
+| Default CLI (`--auth-source unknown_capture`) | 62% | **54%** | 0% |
 
 **What the 48% means:** with default settings, authentication results (SPF/DKIM/DMARC) are recorded but not scored, because PhishGuard cannot tell whether an `Authentication-Results` header was written by your mail gateway or forged by the sender. Phishing that relies mainly on spoofed authentication is therefore under-scored. Fixing this safely is the 0.7 milestone.
 
@@ -35,7 +35,7 @@ Earlier versions of this README reported 100% accuracy. That figure came from an
 | Area | Checks | Scored by default |
 | --- | --- | --- |
 | Authentication | SPF, DKIM, DMARC results from `Authentication-Results` / `Received-SPF`; DKIM signature presence | Only with `--auth-source trusted_gateway` |
-| Sender | Reply-To vs From mismatch | Yes |
+| Sender | Reply-To vs From mismatch; typosquat and combosquat of the `From` domain; brand named in the display name that the sending domain does not own | Yes |
 | Links | HTML link text vs real destination; IP hosts, `@` tricks, deep subdomains, abused TLDs, non-standard ports, punycode; typosquat and combosquat against a curated brand list | Yes |
 | Attachments | Risky and active-content extensions, double extensions, bidirectional-text filenames, executable MIME type vs filename | Yes |
 | Enrichment (opt-in) | AbuseIPDB (IPs), VirusTotal (URLs), SPF/DMARC DNS, RDAP domain age, TLS certificate | Only with `--enrich` |
@@ -49,12 +49,13 @@ These are confirmed misses or false positives, tracked on the roadmap below. Ana
 - **Attachments not marked `Content-Disposition: attachment` are not seen.** An executable sent `inline`, or with no disposition, produces no attachment finding.
 - **File type comes from the filename and MIME type only.** File signatures (magic bytes) are not checked, so an executable named `invoice.pdf` and sent as `application/octet-stream` scores 0.
 - **A direct signal can still end up `likely_benign`.** A link-text mismatch or executable type mismatch only forces escalation when the total score is HIGH.
-- **The sender domain itself is not checked for lookalikes.** `"PayPal Security" <service@paypa1.com>` with no links scores 0.
 - **HTML forms, iframes, and meta refresh are not extracted.** Only `<a href>` links are.
-- **The brand check flags some legitimate domains.** Examples include `login.microsoftonline.com`, `outlook.office365.com`, `s3.amazonaws.com`, and `purchase.com` (contains "chase"). Short brands also match ordinary words (`abc.com` → hsbc, `ups.com` → usps).
 - **A display name can hide a Reply-To mismatch.** For example: `"a@x.com <a@x.com>" <evil@y.com>`.
 - **URLs containing a backslash are analyzed as the wrong host.** For `http://evil.example\@paypal.com`, browsers go to `evil.example`, but PhishGuard analyzes `paypal.com`.
 - **One VirusTotal engine is enough to raise a high-confidence malicious finding.**
+- **A brand-owned domain missing from `known_brands.json` reads as impersonation of itself.** The owned-domain lists are curated, not exhaustive; a legitimate domain that is not listed can produce a brand finding, and adding it is a data change, not a code change.
+- **A lookalike that both substitutes a character and adds words to one label is missed.** `paypa1-secure-login.ru` defeats the edit-distance check (the whole label is too far from the brand) and the combosquat check (the brand spelling is not present).
+- **Brand-named mail from a brand's own hosting domain is not checked against that brand.** A page for Amazon hosted on `s3.amazonaws.com` is not reported as an Amazon squat, because that domain is Amazon's. Another brand on the same host still is.
 
 ### Design limitations
 
@@ -62,7 +63,7 @@ These are confirmed misses or false positives, tracked on the roadmap below. Ana
 - DKIM signatures are detected, not cryptographically verified.
 - Authentication headers affect scoring only when the analyst declares their provenance, because forged `Authentication-Results` headers are trivial to add.
 - DNS records show what a domain publishes, not what happened at delivery.
-- Domain extraction uses a bundled public-suffix snapshot; update the dependency periodically.
+- Domain extraction uses a bundled public-suffix snapshot; update the dependency periodically. When the snapshot does not recognise a suffix, the registrable domain falls back to the last two labels, so an unknown TLD cannot make `paypal.com.evil.<new-tld>` read as the real PayPal.
 - Enrichment coverage depends on API keys, availability, and rate limits.
 - Repeated hits of one rule stay visible as evidence but score only once.
 
@@ -245,9 +246,9 @@ Bounded parsing of hostile input, offline-by-default operation, safe HTML/CEF/CS
 
 ### 0.8: Analyst trust
 
-- [ ] Brand-owned domain allowlist, stricter edit distance, whole-token combosquat matching
+- [x] Brand-owned domain allowlist, stricter edit distance, whole-token combosquat matching
 - [ ] Address-parser-based Reply-To comparison; WHATWG-style backslash handling in URLs
-- [ ] Sender-domain lookalike and display-name brand-spoof checks
+- [x] Sender-domain lookalike and display-name brand-spoof checks
 - [ ] Extract `form[action]`, `iframe`, `meta refresh`, `data:` / `javascript:` URLs; flag password inputs
 - [ ] VirusTotal finding requires a minimum engine count
 

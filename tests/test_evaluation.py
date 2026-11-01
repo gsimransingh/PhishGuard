@@ -40,16 +40,18 @@ def test_synthetic_corpus_is_backed_by_eml_files():
     repo_root = Path(__file__).parent.parent
     cases = build_synthetic_cases()
 
-    assert len(cases) == 34
+    assert len(cases) == 40
     assert all((repo_root / case["path"]).is_file() for case in cases)
     assert all(case["path"].endswith(".eml") for case in cases)
     assert {case["source_type"] for case in cases} == {"synthetic_generated_eml"}
 
 
 # Ratchet for the headline metric. Raise these floors whenever a fix lands;
-# never lower them to make a change pass. Values measured 2026-10-22 on the
-# 41-case corpus (7 fixtures + 34 synthetic) in default CLI mode.
-DEFAULT_MODE_RECALL_FLOOR = 10 / 21
+# never lower them to make a change pass. Values measured 2026-11-01 on the
+# 47-case corpus (7 fixtures + 40 synthetic) in default CLI mode, after the
+# brand work pointed the engine at the From header: 13 of 24 phishing cases
+# detected, up from 10 of 21 on the 41-case corpus.
+DEFAULT_MODE_RECALL_FLOOR = 13 / 24
 DEFAULT_MODE_MAX_FALSE_POSITIVE_RATE = 0.0
 
 

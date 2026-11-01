@@ -1,41 +1,159 @@
 {
-  "_comment": "Brand names checked for typosquatting/combosquatting in url_analyzer.py. Lowercase, no TLD. Extend this list freely as new targeted brands come up, no code changes needed.",
+  "_comment": "Brands checked for typosquatting/combosquatting and display-name spoofing in url_analyzer.py and analyzer.py. One entry per brand OWNER: 'names' are the lowercase strings matched against hostname labels and display names (no TLD), 'domains' are the registrable domains that owner legitimately operates. Brands that share an owner share one entry, so mail for Outlook arriving from office365.com is not treated as impersonation. Extend this freely as new targeted brands come up, no code changes needed.",
+  "_warning": "Every entry in 'domains' is an allowlist entry: a brand check is skipped when the hostname's registrable domain appears there. A domain listed here by mistake is a detection bypass an attacker could register, so add only domains you can verify the owner controls. Leaving a real one out costs at most a false positive.",
   "brands": [
-    "paypal",
-    "amazon",
-    "microsoft",
-    "google",
-    "apple",
-    "facebook",
-    "instagram",
-    "whatsapp",
-    "netflix",
-    "linkedin",
-    "dropbox",
-    "docusign",
-    "adobe",
-    "ebay",
-    "steam",
-    "outlook",
-    "office365",
-    "irs",
-    "chase",
-    "bankofamerica",
-    "wellsfargo",
-    "citibank",
-    "hsbc",
-    "barclays",
-    "hdfcbank",
-    "icicibank",
-    "sbi",
-    "axisbank",
-    "fedex",
-    "ups",
-    "dhl",
-    "usps",
-    "verizon",
-    "att",
-    "coinbase",
-    "binance"
+    {
+      "names": ["paypal"],
+      "domains": ["paypal.com", "paypal.me", "paypalobjects.com", "venmo.com"]
+    },
+    {
+      "names": ["amazon"],
+      "domains": [
+        "amazon.com", "amazonaws.com", "amazonses.com", "awsstatic.com",
+        "media-amazon.com", "ssl-images-amazon.com", "primevideo.com", "audible.com"
+      ]
+    },
+    {
+      "names": ["microsoft", "outlook", "office365"],
+      "domains": [
+        "microsoft.com", "microsoftonline.com", "microsoft365.com", "office.com",
+        "office365.com", "outlook.com", "live.com", "hotmail.com", "msn.com",
+        "sharepoint.com", "onedrive.com", "azure.com", "windows.net",
+        "azurewebsites.net", "skype.com", "xbox.com", "bing.com"
+      ]
+    },
+    {
+      "names": ["google"],
+      "domains": [
+        "google.com", "googleapis.com", "googleusercontent.com", "googlemail.com",
+        "gstatic.com", "gmail.com", "youtube.com", "android.com", "goo.gl",
+        "withgoogle.com", "google-analytics.com", "doubleclick.net",
+        "firebaseapp.com", "appspot.com", "blogspot.com"
+      ]
+    },
+    {
+      "names": ["apple"],
+      "domains": [
+        "apple.com", "icloud.com", "me.com", "mac.com", "itunes.com",
+        "cdn-apple.com", "mzstatic.com"
+      ]
+    },
+    {
+      "names": ["facebook", "instagram", "whatsapp"],
+      "domains": [
+        "facebook.com", "facebookmail.com", "fb.com", "fbcdn.net", "meta.com",
+        "messenger.com", "instagram.com", "cdninstagram.com", "whatsapp.com",
+        "whatsapp.net", "wa.me"
+      ]
+    },
+    {
+      "names": ["netflix"],
+      "domains": ["netflix.com", "nflximg.net", "nflxext.com", "nflxvideo.net"]
+    },
+    {
+      "names": ["linkedin"],
+      "domains": ["linkedin.com", "licdn.com", "lnkd.in"]
+    },
+    {
+      "names": ["dropbox"],
+      "domains": [
+        "dropbox.com", "dropboxmail.com", "dropboxusercontent.com",
+        "dropboxstatic.com", "db.tt"
+      ]
+    },
+    {
+      "names": ["docusign"],
+      "domains": ["docusign.com", "docusign.net"]
+    },
+    {
+      "names": ["adobe"],
+      "domains": ["adobe.com", "adobe.io", "adobelogin.com", "acrobat.com", "typekit.net"]
+    },
+    {
+      "names": ["ebay"],
+      "domains": ["ebay.com", "ebaystatic.com", "ebayimg.com", "ebayinc.com"]
+    },
+    {
+      "names": ["steam"],
+      "domains": [
+        "steampowered.com", "steamcommunity.com", "steamstatic.com", "valvesoftware.com"
+      ]
+    },
+    {
+      "names": ["irs"],
+      "domains": ["irs.gov", "treasury.gov"]
+    },
+    {
+      "names": ["chase"],
+      "domains": ["chase.com", "jpmorganchase.com", "jpmorgan.com"]
+    },
+    {
+      "names": ["bankofamerica"],
+      "domains": ["bankofamerica.com", "bofa.com", "merrilledge.com"]
+    },
+    {
+      "names": ["wellsfargo"],
+      "domains": ["wellsfargo.com", "wf.com", "wellsfargoadvisors.com"]
+    },
+    {
+      "names": ["citibank"],
+      "domains": ["citibank.com", "citi.com", "citigroup.com"]
+    },
+    {
+      "names": ["hsbc"],
+      "domains": ["hsbc.com", "hsbc.co.uk", "hsbcnet.com"]
+    },
+    {
+      "names": ["barclays"],
+      "domains": ["barclays.com", "barclays.co.uk", "barclaycard.co.uk"]
+    },
+    {
+      "names": ["hdfcbank"],
+      "domains": ["hdfcbank.com", "hdfcbank.net"]
+    },
+    {
+      "names": ["icicibank"],
+      "domains": ["icicibank.com", "icicibank.co.in"]
+    },
+    {
+      "names": ["sbi"],
+      "domains": ["sbi.co.in", "onlinesbi.com", "onlinesbi.sbi"]
+    },
+    {
+      "names": ["axisbank"],
+      "domains": ["axisbank.com", "axisbank.co.in"]
+    },
+    {
+      "names": ["fedex"],
+      "domains": ["fedex.com"]
+    },
+    {
+      "names": ["ups"],
+      "domains": ["ups.com"]
+    },
+    {
+      "names": ["dhl"],
+      "domains": ["dhl.com", "dhl.de", "dpdhl.com"]
+    },
+    {
+      "names": ["usps"],
+      "domains": ["usps.com"]
+    },
+    {
+      "names": ["verizon"],
+      "domains": ["verizon.com", "verizonwireless.com"]
+    },
+    {
+      "names": ["att"],
+      "domains": ["att.com", "att.net"]
+    },
+    {
+      "names": ["coinbase"],
+      "domains": ["coinbase.com"]
+    },
+    {
+      "names": ["binance"],
+      "domains": ["binance.com", "binance.us"]
+    }
   ]
 }
